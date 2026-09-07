@@ -1,0 +1,27 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA', '.']
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA']
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - smart-capturer
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --service-account=${_SERVICE_ACCOUNT}
+      - --set-env-vars=STORAGE_BUCKET=${_STORAGE_BUCKET}
+      - --set-secrets=OPENAI_API_KEY=smart-capturer-openai:latest,CAPTURE_ACCESS_KEY=smart-capturer-family-key:latest
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA'
+substitutions:
+  _REGION: us-west1
+  _REPOSITORY: smart-capturer
+  _SERVICE_ACCOUNT: smart-capturer@$PROJECT_ID.iam.gserviceaccount.com
+  _STORAGE_BUCKET: ${PROJECT_ID}-smart-capturer
+options:
+  logging: CLOUD_LOGGING_ONLY
