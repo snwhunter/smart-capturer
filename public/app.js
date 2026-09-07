@@ -15,6 +15,13 @@ async function apiFetch(url, options={}){
   return r;
 }
 
+async function responseJsonOrThrow(r){
+  let payload={};
+  try { payload=await r.json(); } catch {}
+  if(!r.ok) throw new Error(payload.error || payload.message || `Request failed (${r.status})`);
+  return payload;
+}
+
 const modes = [...document.querySelectorAll('.mode')];
 const panes = { image:$('#imagePane'), link:$('#linkPane'), data:$('#dataPane') };
 modes.forEach(btn => btn.addEventListener('click', () => setMode(btn.dataset.mode)));
@@ -36,8 +43,12 @@ async function handleFiles(files){
   if(state.batch && state.sharedContext){ fillContext(state.sharedContext, true); return; }
   setStatus(`Analyzing ${files.length > 1 ? files.length + ' images' : 'image'}…`);
   const file=await filePayload(files[0]);
-  try { fillContext(await (await apiFetch('/api/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:'image',file})})).json()); }
-  catch { fillContext(localGuess('image','',files[0]?.name)); }
+  try {
+    const result=await responseJsonOrThrow(await apiFetch('/api/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:'image',file})}));
+    fillContext(result);
+    if(result.warning) setStatus(`AI fallback: ${result.warning}`);
+  }
+  catch(e){ fillContext(localGuess('image','',files[0]?.name)); setStatus(`AI unavailable: ${e.message}`); }
 }
 
 async function analyzeText(kind,text){
@@ -45,15 +56,19 @@ async function analyzeText(kind,text){
   state.files=[]; state.text=text;
   if(state.batch && state.sharedContext){ fillContext(state.sharedContext,true); return; }
   setStatus('Analyzing context…');
-  try { fillContext(await (await apiFetch('/api/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,text})})).json()); }
-  catch { fillContext(localGuess(kind,text,'')); }
+  try {
+    const result=await responseJsonOrThrow(await apiFetch('/api/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind,text})}));
+    fillContext(result);
+    if(result.warning) setStatus(`AI fallback: ${result.warning}`);
+  }
+  catch(e){ fillContext(localGuess(kind,text,'')); setStatus(`AI unavailable: ${e.message}`); }
 }
 
 function localGuess(kind,text,filename=''){
   const s=(text+' '+filename).toLowerCase(); let category='Other';
   if(/receipt|invoice|oreilly|o'reilly|autozone|napa/.test(s)) category='Receipt';
   else if(/recipe|ingredient|instagram|reel|cook/.test(s)) category='Recipe';
-  return {category,title:filename||'New capture',context:text,tags:[],confidence:.25,destination_hint:category,extracted:{}};
+  return {category,title:filename||'New capture',context:text,tags:[],confidence:.25,destination_hint:category,extracted:{},source:'browser-fallback'};
 }
 
 function fillContext(a, fromShared=false){
@@ -72,9 +87,8 @@ async function saveCapture(){
   const metadata={kind:state.mode,category:$('#category').value,title:$('#title').value,context:$('#context').value,tags:$('#tags').value.split(',').map(s=>s.trim()).filter(Boolean),destination:$('#destination').value,original_text:state.text,extracted:state.analysis?.extracted||{},analysis_source:state.analysis?.source||'shared-context'};
   const files=await Promise.all(state.files.map(filePayload));
   try{
-    const r=await apiFetch('/api/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({metadata,files})});
-    if(!r.ok) throw new Error('save failed');
-    const saved=await r.json(); addRecent({...metadata,id:saved.id,created_at:new Date().toISOString()});
+    const saved=await responseJsonOrThrow(await apiFetch('/api/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({metadata,files})}));
+    addRecent({...metadata,id:saved.id,created_at:new Date().toISOString()});
     if($('#reuseContext').checked || state.batch){ state.sharedContext={category:metadata.category,title:metadata.title,context:metadata.context,tags:metadata.tags,confidence:1,destination_hint:metadata.destination,extracted:{}}; state.batch=true; updateBatchUI(); }
     resetCurrent(true);
   }catch(e){ setStatus(`Could not save: ${e.message}`); }
