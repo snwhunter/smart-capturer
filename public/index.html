@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Smart Capturer" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/styles.css" />
+  <title>Smart Capturer</title>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">REV 1</div>
+        <h1>Smart Capturer</h1>
+        <p>Capture first. Let Smart Capturer suggest the context.</p>
+      </div>
+      <button id="batchToggle" class="pill" aria-pressed="false">Batch off</button>
+    </header>
+
+    <section class="card capture-card">
+      <div class="mode-grid">
+        <button class="mode active" data-mode="image">📷<span>Image</span></button>
+        <button class="mode" data-mode="link">🔗<span>Link</span></button>
+        <button class="mode" data-mode="data">✍️<span>Data</span></button>
+      </div>
+
+      <div id="imagePane" class="pane active">
+        <label class="camera-button"><span>Take photo</span><input id="cameraInput" type="file" accept="image/*" capture="environment" hidden /></label>
+        <label class="secondary-button">Choose photo(s)<input id="fileInput" type="file" accept="image/*" multiple hidden /></label>
+      </div>
+      <div id="linkPane" class="pane"><input id="linkInput" inputmode="url" placeholder="Paste a link…" /><button id="analyzeLink" class="primary">Analyze link</button></div>
+      <div id="dataPane" class="pane"><textarea id="dataInput" rows="5" placeholder="Type or paste anything…"></textarea><button id="analyzeData" class="primary">Analyze data</button></div>
+      <div id="preview" class="preview hidden"></div><div id="status" class="status hidden"></div>
+    </section>
+
+    <section id="contextCard" class="card hidden">
+      <div class="section-title"><div><span class="eyebrow">SUGGESTED CONTEXT</span><h2>Does this look right?</h2></div><span id="confidence" class="confidence"></span></div>
+      <div class="form-grid">
+        <label>Category<select id="category"><option>Receipt</option><option>Recipe</option><option>Work Photo</option><option>Old Photo / Archive</option><option>Vehicle</option><option>Other</option></select></label>
+        <label>Title<input id="title" /></label>
+        <label class="wide">Context<textarea id="context" rows="4"></textarea></label>
+        <label>Tags<input id="tags" placeholder="comma, separated" /></label>
+        <label>Destination<input id="destination" placeholder="Suggested folder/app" /></label>
+      </div>
+      <label class="reuse-row"><input id="reuseContext" type="checkbox" /><span>Use this same context for the next captures</span></label>
+      <div class="actions"><button id="startOver" class="secondary-button">Cancel</button><button id="saveCapture" class="primary">Save capture</button></div>
+    </section>
+
+    <section id="batchCard" class="card hidden"><div class="section-title"><div><span class="eyebrow">BATCH</span><h2 id="batchTitle">Shared context active</h2></div></div><p id="batchSummary"></p><button id="finishBatch" class="secondary-button">Finish batch</button></section>
+    <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">THIS DEVICE</span><h2>Recent captures</h2></div></div><div id="recentList" class="recent-list"><p class="muted">Nothing captured yet.</p></div></section>
+  </main>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
