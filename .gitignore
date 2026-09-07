@@ -1,0 +1,4 @@
+data/uploads/
+data/index.ndjson
+.env
+.DS_Store
