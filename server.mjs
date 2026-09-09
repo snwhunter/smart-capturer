@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createAnalyzer } from './ai.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -10,6 +11,7 @@ const uploadDir = path.join(dataDir, 'uploads');
 const port = Number(process.env.PORT || 8080);
 const storageBucket = process.env.STORAGE_BUCKET || '';
 const accessKey = process.env.CAPTURE_ACCESS_KEY || '';
+const analyzer = createAnalyzer();
 await fs.mkdir(uploadDir, { recursive: true });
 
 const mime = {
@@ -74,33 +76,6 @@ function fallbackContext({kind,text='',filename=''}){
     destination_hint:category==='Recipe'?'Recipes / myApron':category==='Receipt'?'Receipts':category,
     extracted:{}
   };
-}
-
-async function analyzeWithOpenAI(payload){
-  const content=[{
-    type:'input_text',
-    text:`Classify this item for a family capture manager. Return ONLY valid JSON with keys: category, title, context, tags (array), confidence (0-1), destination_hint, extracted (object). Categories should prefer Receipt, Recipe, Work Photo, Old Photo / Archive, Vehicle, Other. Infer useful context such as vehicle/project/vendor/date/amount/people/location when visible, but never invent facts. User-supplied text/link: ${payload.text||'(none)'}`
-  }];
-  if(payload.file?.dataUrl?.startsWith('data:image/')){
-    content.push({type:'input_image',image_url:payload.file.dataUrl,detail:'auto'});
-  }
-  const r=await fetch('https://api.openai.com/v1/responses',{
-    method:'POST',
-    headers:{'authorization':`Bearer ${process.env.OPENAI_API_KEY}`,'content-type':'application/json'},
-    body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-5.6-luna',input:[{role:'user',content}]})
-  });
-  if(!r.ok) throw new Error(`OpenAI ${r.status}: ${await r.text()}`);
-  const out=await r.json();
-  const raw=(out.output||[])
-    .flatMap(x=>x.content||[])
-    .filter(x=>x.type==='output_text')
-    .map(x=>x.text)
-    .join('\n')
-    .trim()
-    .replace(/^```json\s*/i,'')
-    .replace(/```$/,'')
-    .trim();
-  return JSON.parse(raw);
 }
 
 let cachedToken={value:'',expires:0};
@@ -196,7 +171,9 @@ async function api(req,res,url){
       revision:1,
       auth_required:Boolean(accessKey),
       storage:storageBucket?'gcs':'local-development',
-      ai:Boolean(process.env.OPENAI_API_KEY)
+      ai:analyzer.configured,
+      ai_provider:analyzer.provider,
+      ai_model:analyzer.model
     });
   }
   if(!authorized(req)) return json(res,401,{error:'Family access code required'});
@@ -204,13 +181,7 @@ async function api(req,res,url){
   if(req.method==='POST' && url.pathname==='/api/analyze'){
     const p=await bodyJson(req);
     const base=fallbackContext({kind:p.kind,text:p.text,filename:p.file?.name});
-    if(!process.env.OPENAI_API_KEY) return json(res,200,{source:'local-fallback',...base});
-    try {
-      return json(res,200,{source:'openai',...(await analyzeWithOpenAI(p))});
-    } catch(e){
-      console.error(e);
-      return json(res,200,{source:'fallback-after-error',warning:e.message,...base});
-    }
+    return json(res,200,await analyzer.analyze(p,base));
   }
 
   if(req.method==='POST' && url.pathname==='/api/save'){
@@ -252,4 +223,4 @@ const server=http.createServer(async(req,res)=>{
   }
 });
 
-server.listen(port,'0.0.0.0',()=>console.log(`Smart Capturer listening on ${port}`));
+server.listen(port,'0.0.0.0',()=>console.log(`Smart Capturer listening on ${server.address().port}`));
