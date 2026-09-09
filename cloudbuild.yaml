@@ -13,7 +13,7 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
-      - --service-account=${_SERVICE_ACCOUNT}
+      - --service-account=smart-capturer@${PROJECT_ID}.iam.gserviceaccount.com
       - --set-env-vars=STORAGE_BUCKET=${_STORAGE_BUCKET}
       - --set-secrets=OPENAI_API_KEY=smart-capturer-openai:latest,CAPTURE_ACCESS_KEY=smart-capturer-family-key:latest
 images:
@@ -21,7 +21,6 @@ images:
 substitutions:
   _REGION: us-west1
   _REPOSITORY: smart-capturer
-  _SERVICE_ACCOUNT: smart-capturer@$PROJECT_ID.iam.gserviceaccount.com
   _STORAGE_BUCKET: hunter-apps-smart-capturer
 options:
   logging: CLOUD_LOGGING_ONLY
