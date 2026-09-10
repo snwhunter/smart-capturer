@@ -19,7 +19,7 @@ iPhone-first PWA for capturing **images, links, and data**, attempting context a
 
 `ai.mjs` is the server-only provider boundary. Both adapters accept the same capture payload and return the same validated category/title/context/tags/confidence/destination_hint/extracted fields. The browser only calls `/api/analyze`; it never receives a provider API key or calls a model API directly. Gemini uses the [Generate Content API](https://ai.google.dev/api/generate-content), and OpenAI uses the [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create). No SDK or frontend change is required to switch providers.
 
-The default model is `gemini-2.5-flash`, a [documented multimodal Flash model](https://ai.google.dev/gemini-api/docs/models). Override it with `GEMINI_MODEL` if needed. Model availability and quota must be verified with the deployment's Gemini key.
+The default model is `gemini-3.6-flash`, a [documented multimodal Flash model](https://ai.google.dev/gemini-api/docs/models). Override it with `GEMINI_MODEL` if needed. Model availability and quota must be verified with the deployment's Gemini key.
 
 Provider requests have a 45-second timeout. Missing keys, unavailable providers, and invalid output produce editable local suggestions with a warning. There is **no automatic failover to another AI provider**. Upstream response bodies and keys are excluded from client warnings and analysis logs.
 
@@ -37,7 +37,7 @@ Without Google Cloud environment variables, saves go to the local `data/` folder
 Server environment variables:
 - `AI_PROVIDER` â€” `gemini` (default) or `openai`; invalid values fail startup
 - `GEMINI_API_KEY` â€” required for real Gemini analysis
-- `GEMINI_MODEL` â€” defaults to `gemini-2.5-flash`
+- `GEMINI_MODEL` â€” defaults to `gemini-3.6-flash`
 - `OPENAI_API_KEY` â€” only used when `AI_PROVIDER=openai`
 - `OPENAI_MODEL` â€” defaults to `gpt-5.6-luna`
 - `CAPTURE_ACCESS_KEY` â€” family access code

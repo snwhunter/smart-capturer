@@ -101,7 +101,7 @@ function parseAnalysis(raw) {
 }
 
 const providers = {
-  gemini: { analyze: gemini, key: 'GEMINI_API_KEY', model: 'GEMINI_MODEL', defaultModel: 'gemini-2.5-flash' },
+  gemini: { analyze: gemini, key: 'GEMINI_API_KEY', model: 'GEMINI_MODEL', defaultModel: 'gemini-3.6-flash' },
   openai: { analyze: openai, key: 'OPENAI_API_KEY', model: 'OPENAI_MODEL', defaultModel: 'gpt-5.6-luna' }
 };
 

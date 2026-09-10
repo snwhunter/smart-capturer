@@ -23,7 +23,7 @@ images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA'
 substitutions:
   _AI_PROVIDER: gemini
-  _GEMINI_MODEL: gemini-2.5-flash
+  _GEMINI_MODEL: gemini-3.6-flash
   _OPENAI_MODEL: gpt-5.6-luna
   _AI_KEY_ENV: GEMINI_API_KEY
   _AI_KEY_SECRET: smart-capturer-gemini
