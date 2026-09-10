@@ -1,4 +1,7 @@
 steps:
+  - name: node:22-alpine
+    entrypoint: npm
+    args: ['test']
   - name: gcr.io/cloud-builders/docker
     args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA', '.']
   - name: gcr.io/cloud-builders/docker
@@ -14,13 +17,21 @@ steps:
       - --platform=managed
       - --allow-unauthenticated
       - --service-account=smart-capturer@${PROJECT_ID}.iam.gserviceaccount.com
-      - --set-env-vars=STORAGE_BUCKET=${_STORAGE_BUCKET}
-      - --set-secrets=OPENAI_API_KEY=smart-capturer-openai:latest,CAPTURE_ACCESS_KEY=smart-capturer-family-key:latest
+      - --update-env-vars=STORAGE_BUCKET=${_STORAGE_BUCKET},DRIVE_FOLDER_ID=${_DRIVE_FOLDER_ID},AI_ENABLED=${_AI_ENABLED},AI_PROVIDER=${_AI_PROVIDER},GEMINI_MODEL=${_GEMINI_MODEL},OPENAI_MODEL=${_OPENAI_MODEL}
+      - --update-secrets=${_AI_KEY_ENV}=${_AI_KEY_SECRET}:${_AI_KEY_VERSION},GOOGLE_DRIVE_CREDENTIALS_JSON=smart-capturer-drive-oauth:1,CAPTURE_ACCESS_KEY=smart-capturer-family-key:latest
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA'
 substitutions:
+  _AI_ENABLED: 'false'
+  _AI_PROVIDER: gemini
+  _GEMINI_MODEL: gemini-3.6-flash
+  _OPENAI_MODEL: gpt-5.6-luna
+  _AI_KEY_ENV: GEMINI_API_KEY
+  _AI_KEY_SECRET: smart-capturer-gemini
+  _AI_KEY_VERSION: '1'
   _REGION: us-west1
   _REPOSITORY: smart-capturer
   _STORAGE_BUCKET: hunter-apps-smart-capturer
+  _DRIVE_FOLDER_ID: ''
 options:
   logging: CLOUD_LOGGING_ONLY
