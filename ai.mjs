@@ -109,14 +109,15 @@ export function createAnalyzer({ env = process.env, fetchImpl = globalThis.fetch
   const provider = (env.AI_PROVIDER || 'gemini').trim().toLowerCase();
   const adapter = providers[provider];
   if (!adapter) throw new Error('AI_PROVIDER must be gemini or openai');
+  const enabled = (env.AI_ENABLED || 'true').trim().toLowerCase() !== 'false';
   const apiKey = (env[adapter.key] || '').trim();
   const model = (env[adapter.model] || adapter.defaultModel).trim();
   return {
     provider,
     model,
-    configured: Boolean(apiKey),
+    configured: Boolean(enabled && apiKey),
     async analyze(payload, fallback) {
-      if (!apiKey) return { ...fallback, source: 'local-fallback', warning: 'AI is not configured. Review the suggested context.' };
+      if (!enabled || !apiKey) return { ...fallback, source: 'local-fallback', warning: 'AI is not configured. Review the suggested context.' };
       try {
         const raw = await adapter.analyze(payload, { apiKey, model, fetchImpl, timeoutMs });
         return { ...parseAnalysis(raw), source: provider };

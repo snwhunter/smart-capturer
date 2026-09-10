@@ -4,6 +4,7 @@ const state = {
   files:[],
   text:'',
   analysis:null,
+  persisted:null,
   sharedContext:null,
   batch:false,
   accessKey:localStorage.getItem('smartCapturerAccessKey')||''
@@ -66,15 +67,26 @@ async function handleFiles(files){
   }
 
   state.files=images;
+  state.persisted=null;
   state.text='';
   showPreview(images);
+
+  setStatus(`Saving ${images.length>1 ? images.length+' images' : 'image'} to the capture inbox…`);
+  try {
+    state.persisted=await persistImages(images);
+    const inbox=state.persisted.storage==='google-drive'?'ToBeSorted':'the capture inbox';
+    setStatus(`Safe in ${inbox}: ${state.persisted.file_count} image${state.persisted.file_count===1?'':'s'}. Analyzing…`);
+  } catch(e) {
+    setStatus(`Could not save yet: ${e.message}. You can retry with Save Capture.`);
+  }
 
   if(state.batch && state.sharedContext){
     fillContext(state.sharedContext,true);
     return;
   }
 
-  setStatus(`Analyzing ${images.length>1 ? images.length+' images' : 'image'}…`);
+  if(state.persisted) setStatus(`Image saved. Analyzing ${images.length>1 ? images.length+' images' : 'image'}…`);
+  else setStatus(`Analyzing ${images.length>1 ? images.length+' images' : 'image'}…`);
   const file=await filePayload(images[0]);
   try{
     const result=await responseJsonOrThrow(await apiFetch('/api/analyze',{
@@ -88,6 +100,19 @@ async function handleFiles(files){
     fillContext(localGuess('image','',images[0]?.name));
     setStatus(`AI unavailable: ${e.message}`);
   }
+}
+
+async function persistImages(images){
+  const files=await Promise.all(images.map(filePayload));
+  const saved=await responseJsonOrThrow(await apiFetch('/api/save',{
+    method:'POST',
+    headers:{'content-type':'application/json'},
+    body:JSON.stringify({metadata:{kind:'image',capture_status:'raw'},files,defer_metadata:true})
+  }));
+  if(saved.file_count!==images.length){
+    throw new Error(`Server reported ${saved.file_count ?? 0} of ${images.length} images saved.`);
+  }
+  return saved;
 }
 
 async function analyzeText(kind,text){
@@ -153,6 +178,7 @@ async function saveCapture(){
     tags:$('#tags').value.split(',').map(s=>s.trim()).filter(Boolean),
     destination:$('#destination').value,
     original_text:state.text,
+    persisted_files:state.persisted?.record?.files||[],
     extracted:state.analysis?.extracted||{},
     analysis_source:state.analysis?.source||'shared-context'
   };
@@ -166,24 +192,32 @@ async function saveCapture(){
   try{
     $('#saveCapture').disabled=true;
     setStatus(expectedFiles ? `Saving ${expectedFiles} image${expectedFiles===1?'':'s'}…` : 'Saving capture…');
-    const files=await Promise.all(state.files.map(filePayload));
+    const alreadyPersisted=state.mode==='image' && state.persisted;
+    const files=alreadyPersisted ? [] : await Promise.all(state.files.map(filePayload));
     const saved=await responseJsonOrThrow(await apiFetch('/api/save',{
       method:'POST',
       headers:{'content-type':'application/json'},
-      body:JSON.stringify({metadata,files})
+      body:JSON.stringify({
+        metadata,
+        files,
+        capture_id:alreadyPersisted ? state.persisted.id : undefined,
+        metadata_only:Boolean(alreadyPersisted)
+      })
     }));
 
-    if(expectedFiles && saved.file_count!==expectedFiles){
+    if(expectedFiles && !alreadyPersisted && saved.file_count!==expectedFiles){
       throw new Error(`Server reported ${saved.file_count ?? 0} of ${expectedFiles} images saved.`);
     }
 
+    const persisted=alreadyPersisted ? state.persisted : saved;
+
     addRecent({
       ...metadata,
-      id:saved.id,
+      id:persisted.id,
       created_at:new Date().toISOString(),
-      file_count:saved.file_count||0,
-      bytes_saved:saved.bytes_saved||0,
-      saved_files:saved.saved_files||[]
+      file_count:persisted.file_count||0,
+      bytes_saved:persisted.bytes_saved||0,
+      saved_files:persisted.saved_files||[]
     });
 
     if($('#reuseContext').checked || state.batch){
@@ -201,7 +235,7 @@ async function saveCapture(){
     }
 
     const success=expectedFiles
-      ? `Saved ${saved.file_count} image${saved.file_count===1?'':'s'} (${formatBytes(saved.bytes_saved||0)}).`
+      ? `Saved ${persisted.file_count} image${persisted.file_count===1?'':'s'} (${formatBytes(persisted.bytes_saved||0)}).`
       : 'Capture saved.';
     resetCurrent(true);
     setStatus(success);
@@ -239,6 +273,7 @@ function resetCurrent(clearInputs=true){
   state.files=[];
   state.text='';
   state.analysis=null;
+  state.persisted=null;
   $('#contextCard').classList.add('hidden');
   $('#preview').classList.add('hidden');
   $('#status').classList.add('hidden');

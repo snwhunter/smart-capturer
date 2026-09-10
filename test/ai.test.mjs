@@ -19,6 +19,16 @@ test('Gemini is the default, even with an OpenAI key available; no cross-provide
   assert.equal((await analyzer.analyze({}, fallback)).source, 'local-fallback');
 });
 
+test('AI can be disabled without waiting for an upstream request', async () => {
+  const analyzer = createAnalyzer({
+    env: { AI_ENABLED: 'false', GEMINI_API_KEY: 'configured-but-paused' },
+    fetchImpl: () => assert.fail('must not call Gemini while AI is disabled')
+  });
+  assert.equal(analyzer.provider, 'gemini');
+  assert.equal(analyzer.configured, false);
+  assert.equal((await analyzer.analyze({}, fallback)).source, 'local-fallback');
+});
+
 test('Gemini sends server credentials in a header and translates text and image input', async () => {
   let calls = 0;
   const analyzer = createAnalyzer({

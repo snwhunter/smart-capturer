@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAnalyzer } from './ai.mjs';
+import { createDriveStore } from './drive.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, 'public');
@@ -12,6 +13,7 @@ const port = Number(process.env.PORT || 8080);
 const storageBucket = process.env.STORAGE_BUCKET || '';
 const accessKey = process.env.CAPTURE_ACCESS_KEY || '';
 const analyzer = createAnalyzer();
+const driveStore = createDriveStore();
 await fs.mkdir(uploadDir, { recursive: true });
 
 const mime = {
@@ -104,13 +106,52 @@ async function gcsUpload(objectName, buffer, contentType='application/octet-stre
 
 async function saveCapture(p){
   const now=new Date();
-  const id=`${now.toISOString().replace(/[:.]/g,'-')}-${Math.random().toString(36).slice(2,8)}`;
+  const suppliedId=typeof p.capture_id==='string' ? p.capture_id : '';
+  if(suppliedId && !/^[a-zA-Z0-9-]{10,120}$/.test(suppliedId)) throw new Error('Invalid capture ID.');
+  const id=suppliedId||`${now.toISOString().replace(/[:.]/g,'-')}-${Math.random().toString(36).slice(2,8)}`;
   const incomingFiles=Array.isArray(p.files) ? p.files : [];
+  const metadataOnly=Boolean(p.metadata_only);
+  const deferMetadata=Boolean(p.defer_metadata);
   const files=[];
   const record={id,created_at:now.toISOString(),files,...(p.metadata||{})};
 
-  if(record.kind==='image' && incomingFiles.length===0){
+  if(record.kind==='image' && incomingFiles.length===0 && !metadataOnly){
     throw new Error('Image capture contained no image files.');
+  }
+
+  if(driveStore.configured){
+    for(const [index,f] of incomingFiles.entries()){
+      const parsed=parseDataUrl(f.dataUrl);
+      if(!parsed) throw new Error(`Image data was missing or invalid for ${f.name||'capture'}.`);
+      if(parsed.buffer.length===0) throw new Error(`Image ${f.name||'capture'} was empty.`);
+      const fn=safeName(f.name||'capture.bin');
+      const storedName=`${id}_${String(index+1).padStart(2,'0')}_${fn}`;
+      const saved=await driveStore.uploadFile({name:storedName,buffer:parsed.buffer,contentType:parsed.contentType,captureId:id,kind:record.kind});
+      files.push({name:storedName,drive_file_id:saved.id,content_type:parsed.contentType,bytes:parsed.buffer.length});
+    }
+    if(files.length!==incomingFiles.length) throw new Error('Not every selected image was persisted.');
+    let metadataSaved=null;
+    if(!deferMetadata){
+      metadataSaved=await driveStore.uploadFile({
+        name:`${id}_metadata.json`,
+        buffer:Buffer.from(JSON.stringify(record,null,2)),
+        contentType:'application/json',
+        captureId:id,
+        kind:record.kind
+      });
+    }
+    console.log(`Saved capture ${id}: ${files.length} file(s), ${files.reduce((n,f)=>n+f.bytes,0)} bytes to Drive`);
+    return {
+      ok:true,
+      id,
+      saved_files:files.map(x=>x.name),
+      file_count:files.length,
+      bytes_saved:files.reduce((n,f)=>n+f.bytes,0),
+      storage:'google-drive',
+      folder_id:driveStore.folderId,
+      metadata_file_id:metadataSaved?.id||null,
+      record
+    };
   }
 
   if(storageBucket){
@@ -124,7 +165,7 @@ async function saveCapture(p){
       files.push({name:fn,object,content_type:parsed.contentType,bytes:parsed.buffer.length});
     }
     if(files.length!==incomingFiles.length) throw new Error('Not every selected image was persisted.');
-    await gcsUpload(`captures/${id}/metadata.json`,Buffer.from(JSON.stringify(record,null,2)),'application/json');
+    if(!deferMetadata) await gcsUpload(`captures/${id}/metadata.json`,Buffer.from(JSON.stringify(record,null,2)),'application/json');
     console.log(`Saved capture ${id}: ${files.length} file(s), ${files.reduce((n,f)=>n+f.bytes,0)} bytes to GCS`);
     return {
       ok:true,
@@ -149,8 +190,10 @@ async function saveCapture(p){
     files.push({name:fn,content_type:parsed.contentType,bytes:parsed.buffer.length});
   }
   if(files.length!==incomingFiles.length) throw new Error('Not every selected image was persisted.');
-  await fs.writeFile(path.join(dir,'metadata.json'),JSON.stringify(record,null,2));
-  await fs.appendFile(path.join(dataDir,'index.ndjson'),JSON.stringify(record)+'\n');
+  if(!deferMetadata){
+    await fs.writeFile(path.join(dir,'metadata.json'),JSON.stringify(record,null,2));
+    await fs.appendFile(path.join(dataDir,'index.ndjson'),JSON.stringify(record)+'\n');
+  }
   console.log(`Saved capture ${id}: ${files.length} file(s), ${files.reduce((n,f)=>n+f.bytes,0)} bytes locally`);
   return {
     ok:true,
@@ -170,7 +213,7 @@ async function api(req,res,url){
       app:'Smart Capturer',
       revision:1,
       auth_required:Boolean(accessKey),
-      storage:storageBucket?'gcs':'local-development',
+      storage:driveStore.configured?'google-drive':storageBucket?'gcs':'local-development',
       ai:analyzer.configured,
       ai_provider:analyzer.provider,
       ai_model:analyzer.model

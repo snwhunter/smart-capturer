@@ -42,6 +42,7 @@ test('HTTP routes keep credentials server-side and preserve auth and local fallb
   assert.equal(analyzed.category, 'Receipt');
   assert.equal(analyzed.source, 'local-fallback');
   assert.equal((await fetch(`${base}/ai.mjs`)).status, 404);
+  assert.equal((await fetch(`${base}/drive.mjs`)).status, 404);
   const client = await (await fetch(`${base}/app.js`)).text();
   assert.doesNotMatch(client, /GEMINI_API_KEY|OPENAI_API_KEY|unused-test-secret/);
 });
