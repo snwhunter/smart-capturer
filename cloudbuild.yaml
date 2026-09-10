@@ -33,6 +33,6 @@ substitutions:
   _REGION: us-west1
   _REPOSITORY: smart-capturer
   _STORAGE_BUCKET: hunter-apps-smart-capturer
-  _DRIVE_FOLDER_ID: ''
+  _DRIVE_FOLDER_ID: '1lWnM2jmuLI2qrk4aR80KjlRWTe8hnXdN'
 options:
   logging: CLOUD_LOGGING_ONLY
