@@ -21,6 +21,7 @@ steps:
       - --update-secrets=${_AI_KEY_ENV}=${_AI_KEY_SECRET}:${_AI_KEY_VERSION},GOOGLE_DRIVE_CREDENTIALS_JSON=smart-capturer-drive-oauth:1,CAPTURE_ACCESS_KEY=smart-capturer-family-key:latest
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA'
+serviceAccount: 'projects/$PROJECT_ID/serviceAccounts/smart-capturer-build@$PROJECT_ID.iam.gserviceaccount.com'
 substitutions:
   _AI_ENABLED: 'false'
   _AI_PROVIDER: gemini
