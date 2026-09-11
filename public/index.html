@@ -8,8 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Smart Capturer" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="manifest" href="/manifest.webmanifest?v=5" />
+  <link rel="stylesheet" href="/styles.css?v=5" />
   <title>Smart Capturer</title>
 </head>
 <body>
@@ -22,6 +22,26 @@
       </div>
       <a id="scopeSwitch" class="pill scope-switch" href="/work">Switch to work</a>
     </header>
+
+    <section id="recordCard" class="card record-card hidden">
+      <div class="record-heading">
+        <a id="recordBack" class="record-back" href="/capture">← Back to capture</a>
+        <div><span class="eyebrow">CAPTURE RECORD</span><h2 id="recordHeading">Record details</h2></div>
+        <span id="recordStatusBadge" class="record-status">Loading</span>
+      </div>
+      <div class="form-grid">
+        <label>Type<input id="recordKind" readonly /></label>
+        <label>Category<select id="recordCategory"><option>Unsorted</option><option>Receipt</option><option>Recipe</option><option>Homework</option><option>Work Photo</option><option>Old Photo / Archive</option><option>Vehicle</option><option>Other</option></select></label>
+        <label class="wide">Title<input id="recordTitle" /></label>
+        <label class="wide">Original link or data<textarea id="recordOriginal" rows="5"></textarea></label>
+        <label class="wide">Context<textarea id="recordContext" rows="4"></textarea></label>
+        <label>Tags<input id="recordTags" placeholder="comma, separated" /></label>
+        <label>Destination<input id="recordDestination" /></label>
+      </div>
+      <div id="recordIdentity" class="record-identity hidden"></div>
+      <div class="record-actions"><button id="saveRecord" class="primary">Validate and save edits</button></div>
+      <div id="recordSaveStatus" class="status hidden"></div>
+    </section>
 
     <section class="card capture-card">
       <div id="launchContext" class="launch-context hidden" role="status" aria-live="polite">
@@ -45,8 +65,8 @@
         <label class="secondary-button">Choose photo(s)<input id="fileInput" type="file" accept="image/*" multiple hidden /></label>
         <p class="capture-route">Uploads go to <strong id="captureDestination">Personal / ToBeSorted</strong>.</p>
       </div>
-      <div id="linkPane" class="pane"><input id="linkInput" inputmode="url" placeholder="Paste a link…" /><button id="analyzeLink" class="primary">Analyze link</button></div>
-      <div id="dataPane" class="pane"><textarea id="dataInput" rows="5" placeholder="Type or paste anything…"></textarea><button id="analyzeData" class="primary">Analyze data</button></div>
+      <div id="linkPane" class="pane"><input id="linkInput" inputmode="url" placeholder="Paste a link…" /><button id="analyzeLink" class="primary">Add link</button></div>
+      <div id="dataPane" class="pane"><textarea id="dataInput" rows="5" placeholder="Type or paste anything…"></textarea><button id="analyzeData" class="primary">Add data</button></div>
       <div id="preview" class="preview hidden"></div><div id="status" class="status hidden"></div>
     </section>
 
@@ -64,6 +84,6 @@
 
     <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">CAPTURE LOG</span><h2>Recent captures</h2></div><span class="live-label">Auto-updating</span></div><div id="recentList" class="recent-list"><p class="muted">Nothing captured yet.</p></div></section>
   </main>
-  <script src="/app.js" type="module"></script>
+  <script src="/app.js?v=5" type="module"></script>
 </body>
 </html>
