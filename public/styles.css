@@ -48,6 +48,7 @@ textarea { resize:vertical; }
 .hidden { display:none !important; }
 .recent-list { display:grid; gap:10px; }
 .recent-item { padding:12px 0; border-top:1px solid #edf0f4; display:grid; grid-template-columns:58px 1fr auto; align-items:start; gap:12px; }
+.recent-item { color:inherit; text-decoration:none; }
 .recent-item:first-child { border-top:0; padding-top:0; }
 .recent-item strong,.recent-item span { display:block; }
 .recent-item time { font-size:11px; color:#94a3b8; white-space:nowrap; }
@@ -60,4 +61,11 @@ textarea { resize:vertical; }
 .recent-item.failed .recent-meta { color:#b91c1c; }
 .recent-item.uploading .recent-meta,.recent-item.queued .recent-meta { color:#92400e; }
 .muted { color:#94a3b8; }
+.record-heading { display:grid; grid-template-columns:1fr auto; align-items:start; gap:12px; margin-bottom:18px; }
+.record-heading .record-back { grid-column:1/-1; color:#1d4ed8; font-size:13px; font-weight:800; text-decoration:none; }
+.record-status { border-radius:999px; padding:8px 10px; background:#eef2f7; border:1px solid #dbe2ea; font-size:12px; font-weight:800; }
+.record-identity { margin-top:14px; padding:12px; border-radius:13px; background:#f8fafc; color:#475569; font-size:12px; font-weight:700; }
+.record-actions { margin-top:16px; display:grid; }
+.record-mode .capture-card { display:none; }
+.status.failed-status { background:#fef2f2; color:#b91c1c; }
 @media(max-width:540px){ .form-grid{grid-template-columns:1fr}.wide{grid-column:auto} h1{font-size:31px}.card{border-radius:21px}.launch-context{grid-template-columns:auto 1fr}.launch-context .clear-context{grid-column:1/-1;width:100%}.launch-context strong{font-size:22px} }
