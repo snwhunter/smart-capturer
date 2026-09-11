@@ -1,4 +1,4 @@
-const CACHE = 'smart-capturer-v4';
+const CACHE = 'smart-capturer-v5';
 const ASSETS = ['/', '/capture', '/work', '/styles.css', '/app.js', '/launch-context.js', '/manifest.webmanifest'];
 
 self.addEventListener('install', e => {

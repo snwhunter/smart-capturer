@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clearLaunchContext, launchSearchForPath, parseLaunchContext } from '../public/launch-context.js';
+import { captureButtonLabel, clearLaunchContext, launchSearchForPath, parseLaunchContext } from '../public/launch-context.js';
 
 test('assignment links become durable Homework launch context', () => {
   assert.deepEqual(parseLaunchContext('?assignment=Algebra+5.2&assignment_id=abc-123'), {
@@ -26,4 +26,10 @@ test('generic callers can preload context and switching scope preserves it', () 
 test('clearing launch context removes only integration parameters', () => {
   assert.equal(clearLaunchContext('?assignment=Test&assignment_id=7&keep=yes'), '?keep=yes');
   assert.equal(parseLaunchContext('?assignment=+++'), null);
+});
+
+test('the camera button names the active assignment', () => {
+  const context = parseLaunchContext('?assignment=Algebra+5.2&assignment_id=abc-123');
+  assert.equal(captureButtonLabel(context), 'Take photo for Algebra 5.2');
+  assert.equal(captureButtonLabel(null), 'Take photo');
 });

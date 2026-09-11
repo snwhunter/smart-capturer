@@ -40,3 +40,8 @@ export function clearLaunchContext(search = '') {
   for (const key of launchKeys) params.delete(key);
   return params.toString() ? `?${params}` : '';
 }
+
+export function captureButtonLabel(launchContext) {
+  const name = launchContext?.assignment_name || launchContext?.context;
+  return name ? `Take photo for ${name}` : 'Take photo';
+}

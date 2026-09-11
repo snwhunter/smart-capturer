@@ -35,7 +35,7 @@ The capture path enqueues each image immediately, shows its thumbnail, and makes
 
 ## Preloaded capture context
 
-Any tracker can open Smart Capturer with context already attached. The context is shown above the camera and copied into every image queued during that session, including retries. Preloaded values take priority over later AI guesses so the external record association is retained.
+Any tracker can open Smart Capturer with context already attached. A prominent warning-colored banner names the active context, explains that every photo will be attached to it, and repeats the context in the camera button. The context is copied into every image queued during that session, including retries. Preloaded values take priority over later AI guesses so the external record association is retained.
 
 Andrew's Homework Tracker shortcut:
 

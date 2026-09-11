@@ -1,4 +1,4 @@
-import { clearLaunchContext, launchSearchForPath, parseLaunchContext } from './launch-context.js';
+import { captureButtonLabel, clearLaunchContext, launchSearchForPath, parseLaunchContext } from './launch-context.js';
 
 const $ = selector => document.querySelector(selector);
 const launchParams = new URLSearchParams(location.search);
@@ -134,7 +134,8 @@ async function enqueueImages(files) {
   if (!images.length) return setStatus('No image file was selected.');
   $('#cameraInput').value = '';
   $('#fileInput').value = '';
-  setStatus(`${images.length} capture${images.length === 1 ? '' : 's'} queued. Ready for the next photo.`);
+  const contextName = state.launchContext?.assignment_name || state.launchContext?.context;
+  setStatus(`${images.length} capture${images.length === 1 ? '' : 's'} queued${contextName ? ` for ${contextName}` : ''}. Ready for the next photo.`);
 
   for (const file of images) {
     const id = makeCaptureId();
@@ -386,11 +387,22 @@ $('#captureDestination').textContent = inboxName;
 
 function renderLaunchContext() {
   const card = $('#launchContext');
-  if (!state.launchContext) return card.classList.add('hidden');
-  $('#launchContextType').textContent = state.launchContext.assignment_name ? 'ASSIGNMENT CONTEXT' : 'PRELOADED CONTEXT';
+  const captureCard = $('.capture-card');
+  if (!state.launchContext) {
+    card.classList.add('hidden');
+    captureCard.classList.remove('context-active');
+    $('#cameraButtonLabel').textContent = 'Take photo';
+    document.title = 'Smart Capturer';
+    return;
+  }
+  $('#launchContextType').textContent = state.launchContext.assignment_name ? 'YOU ARE SCANNING FOR THIS ASSIGNMENT' : 'YOU ARE CAPTURING FOR THIS CONTEXT';
   $('#launchContextName').textContent = state.launchContext.context;
   $('#launchContextMeta').textContent = [state.launchContext.category, state.launchContext.source, state.launchContext.external_ref]
     .filter(Boolean).join(' · ');
+  $('#launchContextInstruction').textContent = `Every photo taken here will be attached to “${state.launchContext.context}”.`;
+  $('#cameraButtonLabel').textContent = captureButtonLabel(state.launchContext);
+  document.title = `Scan for ${state.launchContext.context} · Smart Capturer`;
+  captureCard.classList.add('context-active');
   card.classList.remove('hidden');
 }
 
