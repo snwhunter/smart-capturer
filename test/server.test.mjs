@@ -43,10 +43,13 @@ test('HTTP routes keep credentials server-side and preserve auth and local fallb
   assert.equal(analyzed.source, 'local-fallback');
   assert.equal((await fetch(`${base}/ai.mjs`)).status, 404);
   assert.equal((await fetch(`${base}/drive.mjs`)).status, 404);
-  const client = await (await fetch(`${base}/app.js`)).text();
+  const clientResponse = await fetch(`${base}/app.js`);
+  assert.match(clientResponse.headers.get('cache-control') || '', /no-cache/);
+  const client = await clientResponse.text();
   assert.doesNotMatch(client, /GEMINI_API_KEY|OPENAI_API_KEY|unused-test-secret/);
 
   assert.equal((await fetch(`${base}/work`)).status, 200, 'work capture URL should serve the same app');
+  assert.equal((await fetch(`${base}/record/capture-record-12345?scope=personal`)).status, 200, 'record detail URL should serve the app');
   const captureId = 'capture-work-123456';
   const saved = await (await fetch(`${base}/api/save`, {
     method: 'POST',
@@ -81,4 +84,64 @@ test('HTTP routes keep credentials server-side and preserve auth and local fallb
   assert.equal(updated.record.recognition_status, 'recognized');
   assert.equal(updated.record.destination, 'Work / Project Alpha');
   assert.equal(updated.record.ignored_field, undefined);
+
+  const dataId = 'capture-data-123456';
+  const dataSavedResponse = await fetch(`${base}/api/save`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-smart-capturer-key': 'test-family' },
+    body: JSON.stringify({
+      capture_id: dataId, scope: 'personal',
+      metadata: { kind: 'data', title: 'Quick note', category: 'Unsorted', original_text: 'NAPA receipt 42', processing_status: 'queued' },
+      files: []
+    })
+  });
+  assert.equal(dataSavedResponse.status, 200);
+
+  const processedResponse = await fetch(`${base}/api/captures/${dataId}/process?scope=personal`, {
+    method: 'POST', headers: { 'x-smart-capturer-key': 'test-family' }
+  });
+  assert.equal(processedResponse.status, 200);
+  const processed = await processedResponse.json();
+  assert.equal(processed.record.processing_status, 'waiting_for_ai');
+  assert.equal(processed.record.recognition_status, 'not_run');
+  assert.equal(processed.record.category, 'Receipt');
+
+  const editedResponse = await fetch(`${base}/api/captures/${dataId}?scope=personal`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-smart-capturer-key': 'test-family' },
+    body: JSON.stringify({
+      category: 'Receipt', title: 'NAPA receipt 42', original_text: 'NAPA receipt 42',
+      context: 'Tacoma parts', tags: ['tacoma', 'parts'], destination: 'Personal / ToBeSorted'
+    })
+  });
+  assert.equal(editedResponse.status, 200);
+  const edited = await editedResponse.json();
+  assert.equal(edited.record.review_status, 'validated');
+  assert.equal(edited.record.workflow_status, 'reviewed');
+  assert.equal(edited.record.context, 'Tacoma parts');
+
+  const invalidPatch = await fetch(`${base}/api/captures/${dataId}?scope=personal`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-smart-capturer-key': 'test-family' },
+    body: JSON.stringify({ processing_status: 'invented-status' })
+  });
+  assert.equal(invalidPatch.status, 400);
+
+  const linkId = 'capture-link-123456';
+  await fetch(`${base}/api/save`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-smart-capturer-key': 'test-family' },
+    body: JSON.stringify({
+      capture_id: linkId, scope: 'personal',
+      metadata: { kind: 'link', title: 'Example', category: 'Unsorted', original_text: 'https://example.com' }, files: []
+    })
+  });
+  const invalidLinkEdit = await fetch(`${base}/api/captures/${linkId}?scope=personal`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-smart-capturer-key': 'test-family' },
+    body: JSON.stringify({
+      category: 'Other', title: 'Bad link', original_text: 'not a URL', context: '', tags: [], destination: 'Personal / ToBeSorted'
+    })
+  });
+  assert.equal(invalidLinkEdit.status, 400);
 });
