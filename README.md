@@ -1,14 +1,15 @@
-# Smart Capturer — Revision 2
+# Smart Capturer — Revision 3
 
 iPhone-first PWA for rapidly capturing **images, links, and data** into personal and work inboxes. Photo capture immediately returns control to the camera while upload and optional recognition continue in a resumable queue.
 
-## Rev 2
+## Rev 3
 - Rapid `capture -> use -> capture` photo loop; upload and AI never block the next capture
 - IndexedDB-backed upload queue that resumes when the app is reopened
 - Thumbnail activity log with upload, recognition, workflow, and destination status
 - `/capture` personal URL and `/work` work URL using separate server-controlled Drive folders
 - Metadata sidecars that can be updated by this app or a later folder-processing AI
 - Authenticated `GET`/`PATCH /api/captures/<capture-id>?scope=personal|work` status API
+- URL-preloaded context for tracker integrations, including an Andrew's Homework assignment shortcut
 
 ## Existing capabilities
 - iPhone camera capture (`capture="environment"`)
@@ -31,6 +32,24 @@ The default model is `gemini-3.6-flash`, a [documented multimodal Flash model](h
 Provider requests have a 45-second timeout. Missing keys, unavailable providers, and invalid output produce editable local suggestions with a warning. There is **no automatic failover to another AI provider**. Upstream response bodies and keys are excluded from client warnings and analysis logs.
 
 The capture path enqueues each image immediately, shows its thumbnail, and makes the camera available for the next shot. Two background workers upload queued images while the app remains active; unfinished jobs remain in IndexedDB and resume the next time that personal/work URL is opened. Each capture is accompanied by a JSON metadata sidecar. The UI polls that record, so an external sorter can update recognition status and final destination either through the authenticated status API or by updating the sidecar. AI failure never prevents an image from reaching `ToBeSorted`. When Drive OAuth is not configured, the existing GCS inbox remains the fallback.
+
+## Preloaded capture context
+
+Any tracker can open Smart Capturer with context already attached. The context is shown above the camera and copied into every image queued during that session, including retries. Preloaded values take priority over later AI guesses so the external record association is retained.
+
+Andrew's Homework Tracker shortcut:
+
+```text
+/capture?assignment=<URL-encoded assignment name>&assignment_id=<stable assignment ID>
+```
+
+This sets `category=Homework`, `source=AndrewsHW Tracker`, and stores both `assignment_name` and `external_ref` in the capture metadata. The assignment ID is optional but strongly recommended for matching captures back to the tracker even if an assignment is renamed.
+
+Generic integration parameters are `context`, `title`, `category`, `tags` (comma-separated), `source`, and `ref`. For example:
+
+```text
+/work?context=Panel%207&category=Work%20Photo&source=Job%20Tracker&ref=job-9&tags=plc,wiring
+```
 
 ## Local development
 Requires current Node.js with built-in `fetch`.

@@ -54,7 +54,11 @@ test('HTTP routes keep credentials server-side and preserve auth and local fallb
     body: JSON.stringify({
       capture_id: captureId,
       scope: 'work',
-      metadata: { kind: 'image', recognition_status: 'pending' },
+      metadata: {
+        kind: 'image', recognition_status: 'pending', category: 'Homework',
+        context: 'Algebra 5.2', assignment_name: 'Algebra 5.2',
+        source: 'AndrewsHW Tracker', external_ref: 'assignment-123'
+      },
       files: [{ name: 'test.jpg', dataUrl: 'data:image/jpeg;base64,cGhvdG8=' }]
     })
   })).json();
@@ -66,6 +70,8 @@ test('HTTP routes keep credentials server-side and preserve auth and local fallb
   })).json();
   assert.equal(status.record.scope, 'work');
   assert.equal(status.record.destination, 'Work / ToBeSorted');
+  assert.equal(status.record.context, 'Algebra 5.2');
+  assert.equal(status.record.external_ref, 'assignment-123');
 
   const updated = await (await fetch(`${base}/api/captures/${captureId}?scope=work`, {
     method: 'PATCH',
