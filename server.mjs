@@ -13,7 +13,10 @@ const port = Number(process.env.PORT || 8080);
 const storageBucket = process.env.STORAGE_BUCKET || '';
 const accessKey = process.env.CAPTURE_ACCESS_KEY || '';
 const analyzer = createAnalyzer();
-const driveStore = createDriveStore();
+const personalDriveStore = createDriveStore();
+const workDriveStore = createDriveStore({
+  env: { ...process.env, DRIVE_FOLDER_ID: process.env.WORK_DRIVE_FOLDER_ID || '' }
+});
 await fs.mkdir(uploadDir, { recursive: true });
 
 const mime = {
@@ -33,6 +36,22 @@ function json(res, status, body){
 
 function safeName(name='capture'){
   return name.replace(/[^a-zA-Z0-9._-]+/g,'_').slice(0,120);
+}
+
+function captureScope(value){
+  return value === 'work' ? 'work' : 'personal';
+}
+
+function driveStoreFor(scope){
+  return scope === 'work' ? workDriveStore : personalDriveStore;
+}
+
+function destinationFor(scope){
+  return scope === 'work' ? 'Work / ToBeSorted' : 'Personal / ToBeSorted';
+}
+
+function validCaptureId(value){
+  return typeof value === 'string' && /^[a-zA-Z0-9-]{10,120}$/.test(value);
 }
 
 async function bodyJson(req, limit=30*1024*1024){
@@ -104,40 +123,84 @@ async function gcsUpload(objectName, buffer, contentType='application/octet-stre
   return await r.json();
 }
 
+async function gcsRead(objectName){
+  const token=await googleAccessToken();
+  const u=`https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(storageBucket)}/o/${encodeURIComponent(objectName)}?alt=media`;
+  const r=await fetch(u,{headers:{Authorization:`Bearer ${token}`}});
+  if(r.status===404) return null;
+  if(!r.ok) throw new Error(`Cloud Storage read failed (${r.status})`);
+  return await r.json();
+}
+
 async function saveCapture(p){
   const now=new Date();
   const suppliedId=typeof p.capture_id==='string' ? p.capture_id : '';
-  if(suppliedId && !/^[a-zA-Z0-9-]{10,120}$/.test(suppliedId)) throw new Error('Invalid capture ID.');
+  if(suppliedId && !validCaptureId(suppliedId)) throw new Error('Invalid capture ID.');
   const id=suppliedId||`${now.toISOString().replace(/[:.]/g,'-')}-${Math.random().toString(36).slice(2,8)}`;
+  const scope=captureScope(p.scope);
+  const driveStore=driveStoreFor(scope);
   const incomingFiles=Array.isArray(p.files) ? p.files : [];
   const metadataOnly=Boolean(p.metadata_only);
   const deferMetadata=Boolean(p.defer_metadata);
   const files=[];
-  const record={id,created_at:now.toISOString(),files,...(p.metadata||{})};
+  const record={
+    id,
+    created_at:now.toISOString(),
+    scope,
+    workflow_status:'to_be_sorted',
+    recognition_status:analyzer.configured?'pending':'not_run',
+    destination:destinationFor(scope),
+    files,
+    ...(p.metadata||{}),
+    id,
+    scope
+  };
 
   if(record.kind==='image' && incomingFiles.length===0 && !metadataOnly){
     throw new Error('Image capture contained no image files.');
   }
 
+  if(scope==='work' && personalDriveStore.configured && !workDriveStore.configured){
+    throw new Error('The work ToBeSorted folder is not configured yet.');
+  }
+
   if(driveStore.configured){
+    const existingFiles=await driveStore.listCaptureFiles(id);
+    const existingByName=new Map(existingFiles.map(file=>[file.name,file]));
     for(const [index,f] of incomingFiles.entries()){
       const parsed=parseDataUrl(f.dataUrl);
       if(!parsed) throw new Error(`Image data was missing or invalid for ${f.name||'capture'}.`);
       if(parsed.buffer.length===0) throw new Error(`Image ${f.name||'capture'} was empty.`);
       const fn=safeName(f.name||'capture.bin');
       const storedName=`${id}_${String(index+1).padStart(2,'0')}_${fn}`;
-      const saved=await driveStore.uploadFile({name:storedName,buffer:parsed.buffer,contentType:parsed.contentType,captureId:id,kind:record.kind});
+      const existing=existingByName.get(storedName);
+      if(existing){
+        files.push({name:storedName,drive_file_id:existing.id,content_type:existing.mimeType||parsed.contentType,bytes:Number(existing.size||parsed.buffer.length)});
+        continue;
+      }
+      const saved=await driveStore.uploadFile({name:storedName,buffer:parsed.buffer,contentType:parsed.contentType,captureId:id,kind:record.kind,role:'content',scope});
       files.push({name:storedName,drive_file_id:saved.id,content_type:parsed.contentType,bytes:parsed.buffer.length});
     }
     if(files.length!==incomingFiles.length) throw new Error('Not every selected image was persisted.');
     let metadataSaved=null;
+    if(metadataOnly){
+      const current=await driveStore.readCapture(id);
+      if(current){
+        const merged={...current.record,...record,created_at:current.record.created_at||record.created_at,files:current.record.files||[]};
+        await driveStore.updateCapture(id,merged);
+        console.log(`Updated capture ${id} metadata in Drive`);
+        return {ok:true,id,saved_files:(merged.files||[]).map(x=>x.name),file_count:(merged.files||[]).length,bytes_saved:(merged.files||[]).reduce((n,f)=>n+(f.bytes||0),0),storage:'google-drive',destination:destinationFor(scope),record:merged};
+      }
+    }
     if(!deferMetadata){
       metadataSaved=await driveStore.uploadFile({
         name:`${id}_metadata.json`,
         buffer:Buffer.from(JSON.stringify(record,null,2)),
         contentType:'application/json',
         captureId:id,
-        kind:record.kind
+        kind:record.kind,
+        role:'metadata',
+        scope
       });
     }
     console.log(`Saved capture ${id}: ${files.length} file(s), ${files.reduce((n,f)=>n+f.bytes,0)} bytes to Drive`);
@@ -148,7 +211,7 @@ async function saveCapture(p){
       file_count:files.length,
       bytes_saved:files.reduce((n,f)=>n+f.bytes,0),
       storage:'google-drive',
-      folder_id:driveStore.folderId,
+      destination:destinationFor(scope),
       metadata_file_id:metadataSaved?.id||null,
       record
     };
@@ -160,12 +223,12 @@ async function saveCapture(p){
       if(!parsed) throw new Error(`Image data was missing or invalid for ${f.name||'capture'}.`);
       if(parsed.buffer.length===0) throw new Error(`Image ${f.name||'capture'} was empty.`);
       const fn=safeName(f.name||'capture.bin');
-      const object=`captures/${id}/${fn}`;
+      const object=`captures/${scope}/${id}/${fn}`;
       await gcsUpload(object, parsed.buffer, parsed.contentType);
       files.push({name:fn,object,content_type:parsed.contentType,bytes:parsed.buffer.length});
     }
     if(files.length!==incomingFiles.length) throw new Error('Not every selected image was persisted.');
-    if(!deferMetadata) await gcsUpload(`captures/${id}/metadata.json`,Buffer.from(JSON.stringify(record,null,2)),'application/json');
+    if(!deferMetadata) await gcsUpload(`captures/${scope}/${id}/metadata.json`,Buffer.from(JSON.stringify(record,null,2)),'application/json');
     console.log(`Saved capture ${id}: ${files.length} file(s), ${files.reduce((n,f)=>n+f.bytes,0)} bytes to GCS`);
     return {
       ok:true,
@@ -175,11 +238,12 @@ async function saveCapture(p){
       bytes_saved:files.reduce((n,f)=>n+f.bytes,0),
       storage:'google-cloud-storage',
       bucket:storageBucket,
+      destination:destinationFor(scope),
       record
     };
   }
 
-  const dir=path.join(uploadDir,id);
+  const dir=path.join(uploadDir,scope,id);
   await fs.mkdir(dir,{recursive:true});
   for(const f of incomingFiles){
     const parsed=parseDataUrl(f.dataUrl);
@@ -202,8 +266,40 @@ async function saveCapture(p){
     file_count:files.length,
     bytes_saved:files.reduce((n,f)=>n+f.bytes,0),
     storage:'local-development',
+    destination:destinationFor(scope),
     record
   };
+}
+
+const patchFields=new Set([
+  'workflow_status','recognition_status','destination','category','title','context','tags',
+  'confidence','destination_hint','extracted','analysis_source','analyzed_at','message'
+]);
+
+function cleanStatusPatch(value){
+  const clean={};
+  if(!value || typeof value!=='object' || Array.isArray(value)) return clean;
+  for(const [key,item] of Object.entries(value)) if(patchFields.has(key)) clean[key]=item;
+  return clean;
+}
+
+async function readCapture(id,scope){
+  const driveStore=driveStoreFor(scope);
+  if(driveStore.configured) return (await driveStore.readCapture(id))?.record||null;
+  if(storageBucket) return await gcsRead(`captures/${scope}/${id}/metadata.json`);
+  try { return JSON.parse(await fs.readFile(path.join(uploadDir,scope,id,'metadata.json'),'utf8')); }
+  catch(e){ if(e.code==='ENOENT') return null; throw e; }
+}
+
+async function updateCapture(id,scope,patch){
+  const driveStore=driveStoreFor(scope);
+  if(driveStore.configured) return await driveStore.updateCapture(id,patch);
+  const current=await readCapture(id,scope);
+  if(!current) return null;
+  const record={...current,...patch,id,scope,updated_at:new Date().toISOString()};
+  if(storageBucket) await gcsUpload(`captures/${scope}/${id}/metadata.json`,Buffer.from(JSON.stringify(record,null,2)),'application/json');
+  else await fs.writeFile(path.join(uploadDir,scope,id,'metadata.json'),JSON.stringify(record,null,2));
+  return record;
 }
 
 async function api(req,res,url){
@@ -211,9 +307,10 @@ async function api(req,res,url){
     return json(res,200,{
       ok:true,
       app:'Smart Capturer',
-      revision:1,
+      revision:2,
       auth_required:Boolean(accessKey),
-      storage:driveStore.configured?'google-drive':storageBucket?'gcs':'local-development',
+      storage:personalDriveStore.configured?'google-drive':storageBucket?'gcs':'local-development',
+      scopes:{personal:true,work:workDriveStore.configured||Boolean(storageBucket)||!personalDriveStore.configured},
       ai:analyzer.configured,
       ai_provider:analyzer.provider,
       ai_model:analyzer.model
@@ -231,12 +328,24 @@ async function api(req,res,url){
     return json(res,200,await saveCapture(await bodyJson(req)));
   }
 
+  const statusMatch=url.pathname.match(/^\/api\/captures\/([a-zA-Z0-9-]{10,120})$/);
+  if(statusMatch && req.method==='GET'){
+    const record=await readCapture(statusMatch[1],captureScope(url.searchParams.get('scope')));
+    return record ? json(res,200,{ok:true,record}) : json(res,404,{error:'Capture not found'});
+  }
+  if(statusMatch && req.method==='PATCH'){
+    const patch=cleanStatusPatch(await bodyJson(req,2*1024*1024));
+    if(!Object.keys(patch).length) return json(res,400,{error:'No supported status fields were provided'});
+    const record=await updateCapture(statusMatch[1],captureScope(url.searchParams.get('scope')),patch);
+    return record ? json(res,200,{ok:true,record}) : json(res,404,{error:'Capture not found'});
+  }
+
   return json(res,404,{error:'Not found'});
 }
 
 async function serve(req,res,url){
   let rel=decodeURIComponent(url.pathname);
-  if(rel==='/') rel='/index.html';
+  if(rel==='/' || rel==='/capture' || rel==='/work') rel='/index.html';
   const target=path.normalize(path.join(publicDir,rel));
   if(!target.startsWith(publicDir)){
     res.writeHead(403);

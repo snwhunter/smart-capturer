@@ -45,4 +45,34 @@ test('HTTP routes keep credentials server-side and preserve auth and local fallb
   assert.equal((await fetch(`${base}/drive.mjs`)).status, 404);
   const client = await (await fetch(`${base}/app.js`)).text();
   assert.doesNotMatch(client, /GEMINI_API_KEY|OPENAI_API_KEY|unused-test-secret/);
+
+  assert.equal((await fetch(`${base}/work`)).status, 200, 'work capture URL should serve the same app');
+  const captureId = 'capture-work-123456';
+  const saved = await (await fetch(`${base}/api/save`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-smart-capturer-key': 'test-family' },
+    body: JSON.stringify({
+      capture_id: captureId,
+      scope: 'work',
+      metadata: { kind: 'image', recognition_status: 'pending' },
+      files: [{ name: 'test.jpg', dataUrl: 'data:image/jpeg;base64,cGhvdG8=' }]
+    })
+  })).json();
+  assert.equal(saved.destination, 'Work / ToBeSorted');
+  assert.equal(saved.file_count, 1);
+
+  const status = await (await fetch(`${base}/api/captures/${captureId}?scope=work`, {
+    headers: { 'x-smart-capturer-key': 'test-family' }
+  })).json();
+  assert.equal(status.record.scope, 'work');
+  assert.equal(status.record.destination, 'Work / ToBeSorted');
+
+  const updated = await (await fetch(`${base}/api/captures/${captureId}?scope=work`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-smart-capturer-key': 'test-family' },
+    body: JSON.stringify({ recognition_status: 'recognized', destination: 'Work / Project Alpha', ignored_field: 'nope' })
+  })).json();
+  assert.equal(updated.record.recognition_status, 'recognized');
+  assert.equal(updated.record.destination, 'Work / Project Alpha');
+  assert.equal(updated.record.ignored_field, undefined);
 });

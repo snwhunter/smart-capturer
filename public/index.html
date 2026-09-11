@@ -16,11 +16,11 @@
   <main class="shell">
     <header>
       <div>
-        <div class="eyebrow">REV 1</div>
+        <div id="scopeName" class="eyebrow">PERSONAL CAPTURE</div>
         <h1>Smart Capturer</h1>
-        <p>Capture first. Let Smart Capturer suggest the context.</p>
+        <p>Take the photo and keep moving. Upload and recognition continue in the queue.</p>
       </div>
-      <button id="batchToggle" class="pill" aria-pressed="false">Batch off</button>
+      <a id="scopeSwitch" class="pill scope-switch" href="/work">Switch to work</a>
     </header>
 
     <section class="card capture-card">
@@ -33,6 +33,7 @@
       <div id="imagePane" class="pane active">
         <label class="camera-button"><span>Take photo</span><input id="cameraInput" type="file" accept="image/*" capture="environment" hidden /></label>
         <label class="secondary-button">Choose photo(s)<input id="fileInput" type="file" accept="image/*" multiple hidden /></label>
+        <p class="capture-route">Uploads go to <strong id="captureDestination">Personal / ToBeSorted</strong>.</p>
       </div>
       <div id="linkPane" class="pane"><input id="linkInput" inputmode="url" placeholder="Paste a link…" /><button id="analyzeLink" class="primary">Analyze link</button></div>
       <div id="dataPane" class="pane"><textarea id="dataInput" rows="5" placeholder="Type or paste anything…"></textarea><button id="analyzeData" class="primary">Analyze data</button></div>
@@ -48,12 +49,10 @@
         <label>Tags<input id="tags" placeholder="comma, separated" /></label>
         <label>Destination<input id="destination" placeholder="Suggested folder/app" /></label>
       </div>
-      <label class="reuse-row"><input id="reuseContext" type="checkbox" /><span>Use this same context for the next captures</span></label>
       <div class="actions"><button id="startOver" class="secondary-button">Cancel</button><button id="saveCapture" class="primary">Save capture</button></div>
     </section>
 
-    <section id="batchCard" class="card hidden"><div class="section-title"><div><span class="eyebrow">BATCH</span><h2 id="batchTitle">Shared context active</h2></div></div><p id="batchSummary"></p><button id="finishBatch" class="secondary-button">Finish batch</button></section>
-    <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">THIS DEVICE</span><h2>Recent captures</h2></div></div><div id="recentList" class="recent-list"><p class="muted">Nothing captured yet.</p></div></section>
+    <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">CAPTURE LOG</span><h2>Recent captures</h2></div><span class="live-label">Auto-updating</span></div><div id="recentList" class="recent-list"><p class="muted">Nothing captured yet.</p></div></section>
   </main>
   <script src="/app.js" type="module"></script>
 </body>

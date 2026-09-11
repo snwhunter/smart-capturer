@@ -1,21 +1,28 @@
-# Smart Capturer — Revision 1
+# Smart Capturer — Revision 2
 
-iPhone-first PWA for capturing **images, links, and data**, attempting context automatically, letting the family correct it, and optionally reusing the same context for a batch.
+iPhone-first PWA for rapidly capturing **images, links, and data** into personal and work inboxes. Photo capture immediately returns control to the camera while upload and optional recognition continue in a resumable queue.
 
-## Rev 1
+## Rev 2
+- Rapid `capture -> use -> capture` photo loop; upload and AI never block the next capture
+- IndexedDB-backed upload queue that resumes when the app is reopened
+- Thumbnail activity log with upload, recognition, workflow, and destination status
+- `/capture` personal URL and `/work` work URL using separate server-controlled Drive folders
+- Metadata sidecars that can be updated by this app or a later folder-processing AI
+- Authenticated `GET`/`PATCH /api/captures/<capture-id>?scope=personal|work` status API
+
+## Existing capabilities
 - iPhone camera capture (`capture="environment"`)
 - Multiple-image selection
 - Link and free-form data capture
 - Gemini image/text context analysis by default, with an optional OpenAI adapter
 - Editable category, title, context, tags, and destination
-- Shared-context batch mode
 - Family access code (`CAPTURE_ACCESS_KEY`)
 - Google Drive `ToBeSorted` inbox when Drive OAuth is configured, with Google Cloud Storage fallback
 - PWA manifest/service worker/Home Screen install support
 
 ## Architecture
 
-`iPhone PWA -> Cloud Run -> Google Drive ToBeSorted -> optional AI classification`
+`iPhone PWA -> local resumable queue -> Cloud Run -> personal/work ToBeSorted -> optional AI classification`
 
 `ai.mjs` is the server-only provider boundary. Both adapters accept the same capture payload and return the same validated category/title/context/tags/confidence/destination_hint/extracted fields. The browser only calls `/api/analyze`; it never receives a provider API key or calls a model API directly. Gemini uses the [Generate Content API](https://ai.google.dev/api/generate-content), and OpenAI uses the [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create). No SDK or frontend change is required to switch providers.
 
@@ -23,7 +30,7 @@ The default model is `gemini-3.6-flash`, a [documented multimodal Flash model](h
 
 Provider requests have a 45-second timeout. Missing keys, unavailable providers, and invalid output produce editable local suggestions with a warning. There is **no automatic failover to another AI provider**. Upstream response bodies and keys are excluded from client warnings and analysis logs.
 
-The capture path writes images to `ToBeSorted` immediately after selection, before AI analysis. Confirmed context is saved afterward as a JSON metadata sidecar. The OAuth user that authorizes Smart Capturer owns newly uploaded files; the parent folder's sharing permissions are inherited. AI failure does not prevent a user from saving a capture. When Drive OAuth is not configured, the existing GCS inbox remains the fallback.
+The capture path enqueues each image immediately, shows its thumbnail, and makes the camera available for the next shot. Two background workers upload queued images while the app remains active; unfinished jobs remain in IndexedDB and resume the next time that personal/work URL is opened. Each capture is accompanied by a JSON metadata sidecar. The UI polls that record, so an external sorter can update recognition status and final destination either through the authenticated status API or by updating the sidecar. AI failure never prevents an image from reaching `ToBeSorted`. When Drive OAuth is not configured, the existing GCS inbox remains the fallback.
 
 ## Local development
 Requires current Node.js with built-in `fetch`.
@@ -44,6 +51,7 @@ Server environment variables:
 - `CAPTURE_ACCESS_KEY` — family access code
 - `STORAGE_BUCKET` — GCS bucket used in Cloud Run
 - `DRIVE_FOLDER_ID` — destination folder; configured as the shared `ToBeSorted` folder
+- `WORK_DRIVE_FOLDER_ID` — separate work `ToBeSorted` folder used by the `/work` URL
 - `GOOGLE_DRIVE_CREDENTIALS_JSON` — server-only JSON containing `client_id`, `client_secret`, and `refresh_token`
 
 Set keys through the server environment for local development. Never put them in `public/`, frontend storage, Docker build arguments, or source control. The Docker build excludes `.env` files.
@@ -76,7 +84,7 @@ The build uses `--update-env-vars` and `--update-secrets` to preserve other runt
 
 ### Google Drive deployment prerequisites
 
-Enable the Google Drive API, create an OAuth client, and authorize the automation account with the `drive.file` scope and offline access. Store the resulting `client_id`, `client_secret`, and `refresh_token` JSON as version `1` of `smart-capturer-drive-oauth`. Supply `_DRIVE_FOLDER_ID` at build submission time; its default is empty so the private folder identifier is not committed to the repository. Verify a synthetic image and its metadata sidecar appear in `ToBeSorted` before relying on the workflow.
+Enable the Google Drive API, create an OAuth client, and authorize the automation account with the `drive.file` scope and offline access. Store the resulting `client_id`, `client_secret`, and `refresh_token` JSON as version `1` of `smart-capturer-drive-oauth`. Supply `_DRIVE_FOLDER_ID` and `_WORK_DRIVE_FOLDER_ID` at build submission time. Verify a synthetic image and its metadata sidecar appear in each `ToBeSorted` folder before relying on the workflow.
 
 ### Switch to OpenAI later
 

@@ -54,3 +54,31 @@ test('Drive errors do not expose OAuth credentials or provider response bodies',
   }), /not confirmed saved/);
   assert.doesNotMatch(JSON.stringify(logs), /refresh-test|PRIVATE_FILE_DATA|client-secret-test/);
 });
+
+test('Drive capture metadata can be read and updated by capture ID', async () => {
+  let record = { id: 'capture-test-123', recognition_status: 'pending', destination: 'Personal / ToBeSorted' };
+  const store = createDriveStore({
+    env,
+    fetchImpl: async (url, options = {}) => {
+      const href = String(url);
+      if (href.includes('oauth2.googleapis.com')) {
+        return new Response(JSON.stringify({ access_token: 'access-test', expires_in: 3600 }));
+      }
+      if (href.includes('/drive/v3/files?')) {
+        assert.match(href, /smartCapturerId/);
+        return new Response(JSON.stringify({ files: [{ id: 'metadata-file', name: 'capture-test-123_metadata.json' }] }));
+      }
+      if (href.includes('alt=media')) return new Response(JSON.stringify(record));
+      if (href.includes('/upload/drive/v3/files/metadata-file')) {
+        assert.equal(options.method, 'PATCH');
+        record = JSON.parse(options.body);
+        return new Response(JSON.stringify({ id: 'metadata-file' }));
+      }
+      throw new Error(`Unexpected URL: ${href}`);
+    }
+  });
+  assert.equal((await store.readCapture('capture-test-123')).record.recognition_status, 'pending');
+  const updated = await store.updateCapture('capture-test-123', { recognition_status: 'recognized', destination: 'Fleet / Tacoma' });
+  assert.equal(updated.recognition_status, 'recognized');
+  assert.equal(updated.destination, 'Fleet / Tacoma');
+});

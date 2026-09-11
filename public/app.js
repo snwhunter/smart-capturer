@@ -1,360 +1,368 @@
-const $ = s => document.querySelector(s);
+const $ = selector => document.querySelector(selector);
+const scope = location.pathname.startsWith('/work') || new URLSearchParams(location.search).get('scope') === 'work'
+  ? 'work' : 'personal';
+const inboxName = scope === 'work' ? 'Work / ToBeSorted' : 'Personal / ToBeSorted';
+const recentKey = `smartCapturerRecent:${scope}`;
+
 const state = {
-  mode:'image',
-  files:[],
-  text:'',
-  analysis:null,
-  persisted:null,
-  sharedContext:null,
-  batch:false,
-  accessKey:localStorage.getItem('smartCapturerAccessKey')||''
+  mode: 'image',
+  text: '',
+  analysis: null,
+  accessKey: localStorage.getItem('smartCapturerAccessKey') || '',
+  processing: new Set()
 };
 
-async function apiFetch(url, options={}){
-  options.headers={...(options.headers||{}),'x-smart-capturer-key':state.accessKey};
-  let r=await fetch(url,options);
-  if(r.status===401){
-    const key=prompt('Smart Capturer family access code:')||'';
-    if(!key) throw new Error('Family access code required');
-    state.accessKey=key;
-    localStorage.setItem('smartCapturerAccessKey',key);
-    options.headers={...(options.headers||{}),'x-smart-capturer-key':key};
-    r=await fetch(url,options);
-    if(r.status===401){
+async function apiFetch(url, options = {}) {
+  options.headers = { ...(options.headers || {}), 'x-smart-capturer-key': state.accessKey };
+  let response = await fetch(url, options);
+  if (response.status === 401) {
+    const key = prompt('Smart Capturer family access code:') || '';
+    if (!key) throw new Error('Family access code required');
+    state.accessKey = key;
+    localStorage.setItem('smartCapturerAccessKey', key);
+    options.headers = { ...(options.headers || {}), 'x-smart-capturer-key': key };
+    response = await fetch(url, options);
+    if (response.status === 401) {
       localStorage.removeItem('smartCapturerAccessKey');
-      state.accessKey='';
+      state.accessKey = '';
       throw new Error('Incorrect family access code');
     }
   }
-  return r;
+  return response;
 }
 
-async function responseJsonOrThrow(r){
-  let payload={};
-  try { payload=await r.json(); } catch {}
-  if(!r.ok) throw new Error(payload.error || payload.message || `Request failed (${r.status})`);
+async function responseJsonOrThrow(response) {
+  let payload = {};
+  try { payload = await response.json(); } catch {}
+  if (!response.ok) throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
   return payload;
 }
 
-const modes=[...document.querySelectorAll('.mode')];
-const panes={image:$('#imagePane'),link:$('#linkPane'),data:$('#dataPane')};
-modes.forEach(btn=>btn.addEventListener('click',()=>setMode(btn.dataset.mode)));
-
-function setMode(mode){
-  state.mode=mode;
-  modes.forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
-  Object.entries(panes).forEach(([k,p])=>p.classList.toggle('active',k===mode));
-  resetCurrent(false);
+function loadRecent() {
+  try { return JSON.parse(localStorage.getItem(recentKey) || '[]'); }
+  catch { return []; }
 }
 
-$('#cameraInput').addEventListener('change',e=>handleFiles([...e.target.files]));
-$('#fileInput').addEventListener('change',e=>handleFiles([...e.target.files]));
-$('#analyzeLink').addEventListener('click',()=>analyzeText('link',$('#linkInput').value.trim()));
-$('#analyzeData').addEventListener('click',()=>analyzeText('data',$('#dataInput').value.trim()));
-
-async function handleFiles(files){
-  if(!files.length) return;
-  const images=files.filter(f=>!f.type || f.type.startsWith('image/'));
-  if(!images.length){
-    setStatus('No image file was selected.');
-    return;
-  }
-
-  const totalBytes=images.reduce((n,f)=>n+(f.size||0),0);
-  if(totalBytes>22*1024*1024){
-    setStatus('These images are too large to send together. Try fewer images at a time.');
-    return;
-  }
-
-  state.files=images;
-  state.persisted=null;
-  state.text='';
-  showPreview(images);
-
-  setStatus(`Saving ${images.length>1 ? images.length+' images' : 'image'} to the capture inbox…`);
-  try {
-    state.persisted=await persistImages(images);
-    const inbox=state.persisted.storage==='google-drive'?'ToBeSorted':'the capture inbox';
-    setStatus(`Safe in ${inbox}: ${state.persisted.file_count} image${state.persisted.file_count===1?'':'s'}. Analyzing…`);
-  } catch(e) {
-    setStatus(`Could not save yet: ${e.message}. You can retry with Save Capture.`);
-  }
-
-  if(state.batch && state.sharedContext){
-    fillContext(state.sharedContext,true);
-    return;
-  }
-
-  if(state.persisted) setStatus(`Image saved. Analyzing ${images.length>1 ? images.length+' images' : 'image'}…`);
-  else setStatus(`Analyzing ${images.length>1 ? images.length+' images' : 'image'}…`);
-  const file=await filePayload(images[0]);
-  try{
-    const result=await responseJsonOrThrow(await apiFetch('/api/analyze',{
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify({kind:'image',file})
-    }));
-    fillContext(result);
-    if(result.warning) setStatus(`AI fallback: ${result.warning}`);
-  } catch(e){
-    fillContext(localGuess('image','',images[0]?.name));
-    setStatus(`AI unavailable: ${e.message}`);
-  }
+function saveRecent(items) {
+  localStorage.setItem(recentKey, JSON.stringify(items.slice(0, 30)));
 }
 
-async function persistImages(images){
-  const files=await Promise.all(images.map(filePayload));
-  const saved=await responseJsonOrThrow(await apiFetch('/api/save',{
-    method:'POST',
-    headers:{'content-type':'application/json'},
-    body:JSON.stringify({metadata:{kind:'image',capture_status:'raw'},files,defer_metadata:true})
-  }));
-  if(saved.file_count!==images.length){
-    throw new Error(`Server reported ${saved.file_count ?? 0} of ${images.length} images saved.`);
-  }
-  return saved;
-}
-
-async function analyzeText(kind,text){
-  if(!text) return;
-  state.files=[];
-  state.text=text;
-  if(state.batch && state.sharedContext){
-    fillContext(state.sharedContext,true);
-    return;
-  }
-  setStatus('Analyzing context…');
-  try{
-    const result=await responseJsonOrThrow(await apiFetch('/api/analyze',{
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify({kind,text})
-    }));
-    fillContext(result);
-    if(result.warning) setStatus(`AI fallback: ${result.warning}`);
-  } catch(e){
-    fillContext(localGuess(kind,text,''));
-    setStatus(`AI unavailable: ${e.message}`);
-  }
-}
-
-function localGuess(kind,text,filename=''){
-  const s=(text+' '+filename).toLowerCase();
-  let category='Other';
-  if(/receipt|invoice|oreilly|o'reilly|autozone|napa/.test(s)) category='Receipt';
-  else if(/recipe|ingredient|instagram|reel|cook/.test(s)) category='Recipe';
-  return {
-    category,
-    title:filename||'New capture',
-    context:text,
-    tags:[],
-    confidence:.25,
-    destination_hint:category,
-    extracted:{},
-    source:'browser-fallback'
-  };
-}
-
-function fillContext(a,fromShared=false){
-  state.analysis=a;
-  $('#category').value=[...$('#category').options].some(o=>o.value===a.category)?a.category:'Other';
-  $('#title').value=a.title||'';
-  $('#context').value=a.context||'';
-  $('#tags').value=Array.isArray(a.tags)?a.tags.join(', '):(a.tags||'');
-  $('#destination').value=a.destination_hint||'';
-  $('#confidence').textContent=fromShared?'Shared context':`${Math.round((a.confidence||0)*100)}% guess`;
-  $('#contextCard').classList.remove('hidden');
-  $('#status').classList.add('hidden');
-  $('#contextCard').scrollIntoView({behavior:'smooth',block:'start'});
-}
-
-$('#saveCapture').addEventListener('click',saveCapture);
-async function saveCapture(){
-  const metadata={
-    kind:state.mode,
-    category:$('#category').value,
-    title:$('#title').value,
-    context:$('#context').value,
-    tags:$('#tags').value.split(',').map(s=>s.trim()).filter(Boolean),
-    destination:$('#destination').value,
-    original_text:state.text,
-    persisted_files:state.persisted?.record?.files||[],
-    extracted:state.analysis?.extracted||{},
-    analysis_source:state.analysis?.source||'shared-context'
-  };
-
-  const expectedFiles=state.files.length;
-  if(state.mode==='image' && expectedFiles===0){
-    setStatus('No image is attached to this capture. Choose or take a photo first.');
-    return;
-  }
-
-  try{
-    $('#saveCapture').disabled=true;
-    setStatus(expectedFiles ? `Saving ${expectedFiles} image${expectedFiles===1?'':'s'}…` : 'Saving capture…');
-    const alreadyPersisted=state.mode==='image' && state.persisted;
-    const files=alreadyPersisted ? [] : await Promise.all(state.files.map(filePayload));
-    const saved=await responseJsonOrThrow(await apiFetch('/api/save',{
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify({
-        metadata,
-        files,
-        capture_id:alreadyPersisted ? state.persisted.id : undefined,
-        metadata_only:Boolean(alreadyPersisted)
-      })
-    }));
-
-    if(expectedFiles && !alreadyPersisted && saved.file_count!==expectedFiles){
-      throw new Error(`Server reported ${saved.file_count ?? 0} of ${expectedFiles} images saved.`);
-    }
-
-    const persisted=alreadyPersisted ? state.persisted : saved;
-
-    addRecent({
-      ...metadata,
-      id:persisted.id,
-      created_at:new Date().toISOString(),
-      file_count:persisted.file_count||0,
-      bytes_saved:persisted.bytes_saved||0,
-      saved_files:persisted.saved_files||[]
-    });
-
-    if($('#reuseContext').checked || state.batch){
-      state.sharedContext={
-        category:metadata.category,
-        title:metadata.title,
-        context:metadata.context,
-        tags:metadata.tags,
-        confidence:1,
-        destination_hint:metadata.destination,
-        extracted:{}
-      };
-      state.batch=true;
-      updateBatchUI();
-    }
-
-    const success=expectedFiles
-      ? `Saved ${persisted.file_count} image${persisted.file_count===1?'':'s'} (${formatBytes(persisted.bytes_saved||0)}).`
-      : 'Capture saved.';
-    resetCurrent(true);
-    setStatus(success);
-  } catch(e){
-    setStatus(`Could not save: ${e.message}`);
-  } finally {
-    $('#saveCapture').disabled=false;
-  }
-}
-
-$('#batchToggle').addEventListener('click',()=>{
-  state.batch=!state.batch;
-  if(!state.batch) state.sharedContext=null;
-  updateBatchUI();
-});
-
-$('#finishBatch').addEventListener('click',()=>{
-  state.batch=false;
-  state.sharedContext=null;
-  updateBatchUI();
-});
-
-function updateBatchUI(){
-  $('#batchToggle').textContent=state.batch?'Batch on':'Batch off';
-  $('#batchToggle').setAttribute('aria-pressed',String(state.batch));
-  $('#batchCard').classList.toggle('hidden',!state.batch);
-  $('#batchSummary').textContent=state.sharedContext
-    ? `${state.sharedContext.category} · ${state.sharedContext.context || state.sharedContext.title || 'Shared context'}`
-    : 'Capture the first item, confirm its context, then choose “Use this same context”.';
-}
-
-$('#startOver').addEventListener('click',()=>resetCurrent(true));
-
-function resetCurrent(clearInputs=true){
-  state.files=[];
-  state.text='';
-  state.analysis=null;
-  state.persisted=null;
-  $('#contextCard').classList.add('hidden');
-  $('#preview').classList.add('hidden');
-  $('#status').classList.add('hidden');
-  if(clearInputs){
-    $('#cameraInput').value='';
-    $('#fileInput').value='';
-    $('#linkInput').value='';
-    $('#dataInput').value='';
-    $('#reuseContext').checked=false;
-  }
-}
-
-function setStatus(t){
-  $('#status').textContent=t;
-  $('#status').classList.remove('hidden');
-}
-
-function showPreview(files){
-  const p=$('#preview');
-  p.innerHTML='';
-  p.classList.remove('hidden');
-  files.slice(0,9).forEach(f=>{
-    const img=document.createElement('img');
-    const url=URL.createObjectURL(f);
-    img.src=url;
-    img.onload=()=>URL.revokeObjectURL(url);
-    img.alt=f.name||'Selected image';
-    p.appendChild(img);
-  });
-}
-
-function addRecent(item){
-  const arr=JSON.parse(localStorage.getItem('smartCapturerRecent')||'[]');
-  arr.unshift(item);
-  localStorage.setItem('smartCapturerRecent',JSON.stringify(arr.slice(0,12)));
+function upsertRecent(item) {
+  const items = loadRecent();
+  const index = items.findIndex(entry => entry.id === item.id);
+  if (index >= 0) items[index] = { ...items[index], ...item };
+  else items.unshift(item);
+  saveRecent(items);
   renderRecent();
 }
 
-function renderRecent(){
-  const arr=JSON.parse(localStorage.getItem('smartCapturerRecent')||'[]');
-  $('#recentList').innerHTML=arr.length
-    ? arr.map(x=>{
-        const fileText=x.file_count ? ` · ${x.file_count} image${x.file_count===1?'':'s'}` : '';
-        return `<div class="recent-item"><div><strong>${esc(x.title||x.category)}</strong><span class="recent-meta">${esc(x.category)} · ${esc(x.destination||'Inbox')}${fileText}</span></div><span class="recent-meta">${new Date(x.created_at).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</span></div>`;
-      }).join('')
-    : '<p class="muted">Nothing captured yet.</p>';
+function makeCaptureId() {
+  return `${Date.now()}-${crypto.randomUUID()}`;
 }
 
-async function filePayload(file){
+function openQueue() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('smartCapturerQueue', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('jobs', { keyPath: 'id' });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function queuePut(job) {
+  const db = await openQueue();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('jobs', 'readwrite');
+    transaction.objectStore('jobs').put(job);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+}
+
+async function queueDelete(id) {
+  const db = await openQueue();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('jobs', 'readwrite');
+    transaction.objectStore('jobs').delete(id);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+}
+
+async function queueAll() {
+  const db = await openQueue();
+  const jobs = await new Promise((resolve, reject) => {
+    const request = db.transaction('jobs').objectStore('jobs').getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return jobs;
+}
+
+async function thumbnailFor(file) {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = reject;
+      element.src = objectUrl;
+    });
+    const size = 180;
+    const scale = Math.min(size / image.naturalWidth, size / image.naturalHeight, 1);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', .68);
+  } catch {
+    return '';
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function enqueueImages(files) {
+  const images = files.filter(file => !file.type || file.type.startsWith('image/'));
+  if (!images.length) return setStatus('No image file was selected.');
+  $('#cameraInput').value = '';
+  $('#fileInput').value = '';
+  setStatus(`${images.length} capture${images.length === 1 ? '' : 's'} queued. Ready for the next photo.`);
+
+  for (const file of images) {
+    const id = makeCaptureId();
+    const entry = {
+      id, scope, created_at: new Date().toISOString(), thumbnail: '', title: file.name || 'Photo',
+      category: 'Unsorted', destination: inboxName, upload_status: 'queued', recognition_status: 'pending',
+      workflow_status: 'to_be_sorted', message: 'Waiting to upload'
+    };
+    upsertRecent(entry);
+    const thumbnail = await thumbnailFor(file);
+    upsertRecent({ id, thumbnail });
+    try {
+      await queuePut({ id, scope, file, name: file.name || 'capture.jpg', type: file.type || 'image/jpeg', created_at: entry.created_at });
+    } catch {
+      upsertRecent({ id, upload_status: 'failed', recognition_status: 'not_run', message: 'Could not queue this photo' });
+    }
+  }
+  runQueue();
+}
+
+let activeWorkers = 0;
+async function runQueue() {
+  if (activeWorkers >= 2) return;
+  const jobs = await queueAll().catch(() => []);
+  const available = jobs.filter(job => job.scope === scope && !state.processing.has(job.id));
+  while (activeWorkers < 2 && available.length) {
+    const job = available.shift();
+    activeWorkers += 1;
+    state.processing.add(job.id);
+    processJob(job).finally(() => {
+      activeWorkers -= 1;
+      state.processing.delete(job.id);
+      runQueue();
+    });
+  }
+}
+
+async function processJob(job) {
+  upsertRecent({ id: job.id, upload_status: 'uploading', message: `Uploading to ${inboxName}` });
+  try {
+    const file = await filePayload(job.file, job.name, job.type);
+    const saved = await responseJsonOrThrow(await apiFetch('/api/save', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        capture_id: job.id, scope,
+        metadata: {
+          kind: 'image', capture_status: 'saved', workflow_status: 'to_be_sorted',
+          recognition_status: 'pending', destination: inboxName, original_filename: job.name
+        },
+        files: [file]
+      })
+    }));
+    upsertRecent({
+      id: job.id, upload_status: 'saved', destination: saved.destination || inboxName,
+      file_count: saved.file_count, bytes_saved: saved.bytes_saved, message: `Saved in ${saved.destination || inboxName}`
+    });
+    await queueDelete(job.id);
+    await analyzeQueued(job, file);
+  } catch (error) {
+    upsertRecent({ id: job.id, upload_status: 'failed', recognition_status: 'not_run', message: error.message });
+  }
+}
+
+async function analyzeQueued(job, file) {
+  try {
+    const result = await responseJsonOrThrow(await apiFetch('/api/analyze', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'image', file })
+    }));
+    const succeeded = result.source === 'gemini' || result.source === 'openai';
+    const recognitionStatus = succeeded ? 'recognized' : result.source === 'local-fallback' ? 'not_run' : 'failed';
+    const patch = {
+      recognition_status: recognitionStatus,
+      category: result.category,
+      title: result.title,
+      context: result.context,
+      tags: result.tags,
+      confidence: result.confidence,
+      destination_hint: result.destination_hint,
+      extracted: result.extracted,
+      analysis_source: result.source,
+      analyzed_at: new Date().toISOString(),
+      message: succeeded ? `Recognized as ${result.category}` : 'Saved; awaiting later recognition'
+    };
+    await responseJsonOrThrow(await apiFetch(`/api/captures/${job.id}?scope=${scope}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch)
+    }));
+    upsertRecent({ id: job.id, ...patch });
+  } catch (error) {
+    upsertRecent({ id: job.id, recognition_status: 'failed', message: `Saved; recognition failed: ${error.message}` });
+  }
+}
+
+async function refreshStatuses() {
+  if (!state.accessKey || document.hidden) return;
+  const pending = loadRecent().filter(item => item.upload_status === 'saved' && item.workflow_status !== 'sorted').slice(0, 12);
+  for (const item of pending) {
+    try {
+      const result = await responseJsonOrThrow(await apiFetch(`/api/captures/${item.id}?scope=${scope}`));
+      const record = result.record || {};
+      upsertRecent({
+        id: item.id,
+        title: record.title || item.title,
+        category: record.category || item.category,
+        destination: record.destination || item.destination,
+        recognition_status: record.recognition_status || item.recognition_status,
+        workflow_status: record.workflow_status || item.workflow_status,
+        message: record.message || item.message
+      });
+    } catch {}
+  }
+}
+
+function renderRecent() {
+  const items = loadRecent();
+  $('#recentList').innerHTML = items.length ? items.map(item => {
+    const upload = item.upload_status === 'saved' ? 'Uploaded' : item.upload_status === 'uploading' ? 'Uploading…' : item.upload_status === 'failed' ? 'Upload failed' : 'Queued';
+    const recognition = item.recognition_status === 'recognized' ? `Recognized${item.category ? `: ${item.category}` : ''}`
+      : item.recognition_status === 'failed' ? 'Recognition failed'
+      : item.recognition_status === 'not_run' ? 'Recognition waiting' : 'Recognition pending';
+    return `<article class="recent-item ${esc(item.upload_status || 'queued')}">
+      <div class="recent-thumb">${item.thumbnail?.startsWith('data:image/') ? `<img src="${esc(item.thumbnail)}" alt="Capture thumbnail">` : '<span>📷</span>'}</div>
+      <div class="recent-body"><strong>${esc(item.title || 'Photo')}</strong>
+        <span class="recent-meta">${esc(upload)} · ${esc(recognition)}</span>
+        <span class="recent-destination">${esc(item.destination || inboxName)}</span>
+        ${item.message ? `<span class="recent-message">${esc(item.message)}</span>` : ''}
+      </div>
+      <time>${new Date(item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+    </article>`;
+  }).join('') : '<p class="muted">Nothing captured yet.</p>';
+}
+
+const modes = [...document.querySelectorAll('.mode')];
+const panes = { image: $('#imagePane'), link: $('#linkPane'), data: $('#dataPane') };
+modes.forEach(button => button.addEventListener('click', () => setMode(button.dataset.mode)));
+
+function setMode(mode) {
+  state.mode = mode;
+  modes.forEach(button => button.classList.toggle('active', button.dataset.mode === mode));
+  Object.entries(panes).forEach(([key, pane]) => pane.classList.toggle('active', key === mode));
+  $('#contextCard').classList.add('hidden');
+}
+
+$('#cameraInput').addEventListener('change', event => enqueueImages([...event.target.files]));
+$('#fileInput').addEventListener('change', event => enqueueImages([...event.target.files]));
+$('#analyzeLink').addEventListener('click', () => analyzeText('link', $('#linkInput').value.trim()));
+$('#analyzeData').addEventListener('click', () => analyzeText('data', $('#dataInput').value.trim()));
+
+async function analyzeText(kind, text) {
+  if (!text) return;
+  state.text = text;
+  setStatus('Analyzing context…');
+  try {
+    const result = await responseJsonOrThrow(await apiFetch('/api/analyze', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, text })
+    }));
+    fillContext(result);
+  } catch (error) {
+    setStatus(`Analysis unavailable: ${error.message}`);
+  }
+}
+
+function fillContext(result) {
+  state.analysis = result;
+  $('#category').value = [...$('#category').options].some(option => option.value === result.category) ? result.category : 'Other';
+  $('#title').value = result.title || '';
+  $('#context').value = result.context || '';
+  $('#tags').value = Array.isArray(result.tags) ? result.tags.join(', ') : '';
+  $('#destination').value = result.destination_hint || inboxName;
+  $('#confidence').textContent = `${Math.round((result.confidence || 0) * 100)}% guess`;
+  $('#contextCard').classList.remove('hidden');
+}
+
+$('#saveCapture').addEventListener('click', async () => {
+  const metadata = {
+    kind: state.mode, category: $('#category').value, title: $('#title').value,
+    context: $('#context').value, tags: $('#tags').value.split(',').map(value => value.trim()).filter(Boolean),
+    destination: $('#destination').value || inboxName, original_text: state.text,
+    recognition_status: state.analysis?.source === 'gemini' || state.analysis?.source === 'openai' ? 'recognized' : 'not_run',
+    analysis_source: state.analysis?.source || 'none', extracted: state.analysis?.extracted || {}
+  };
+  try {
+    $('#saveCapture').disabled = true;
+    const saved = await responseJsonOrThrow(await apiFetch('/api/save', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scope, metadata, files: [] })
+    }));
+    upsertRecent({ ...metadata, id: saved.id, scope, created_at: new Date().toISOString(), upload_status: 'saved', workflow_status: 'to_be_sorted' });
+    $('#contextCard').classList.add('hidden');
+    $('#linkInput').value = '';
+    $('#dataInput').value = '';
+    setStatus(`Saved in ${saved.destination || inboxName}.`);
+  } catch (error) {
+    setStatus(`Could not save: ${error.message}`);
+  } finally {
+    $('#saveCapture').disabled = false;
+  }
+});
+
+$('#startOver').addEventListener('click', () => $('#contextCard').classList.add('hidden'));
+
+function setStatus(text) {
+  $('#status').textContent = text;
+  $('#status').classList.remove('hidden');
+}
+
+async function filePayload(file, fallbackName, fallbackType) {
   return {
-    name:file.name,
-    type:file.type,
-    size:file.size,
-    lastModified:file.lastModified,
-    dataUrl:await new Promise((resolve,reject)=>{
-      const r=new FileReader();
-      r.onload=()=>resolve(r.result);
-      r.onerror=()=>reject(r.error||new Error('Could not read image'));
-      r.readAsDataURL(file);
+    name: file.name || fallbackName,
+    type: file.type || fallbackType,
+    size: file.size,
+    lastModified: file.lastModified,
+    dataUrl: await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error('Could not read image'));
+      reader.readAsDataURL(file);
     })
   };
 }
 
-function formatBytes(bytes){
-  if(bytes<1024) return `${bytes} B`;
-  if(bytes<1024*1024) return `${(bytes/1024).toFixed(1)} KB`;
-  return `${(bytes/(1024*1024)).toFixed(1)} MB`;
+function esc(value = '') {
+  return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
 }
 
-function esc(s=''){
-  return String(s).replace(/[&<>"']/g,c=>({
-    '&':'&amp;',
-    '<':'&lt;',
-    '>':'&gt;',
-    '"':'&quot;',
-    "'":'&#39;'
-  }[c]));
-}
+$('#scopeName').textContent = scope === 'work' ? 'WORK CAPTURE' : 'PERSONAL CAPTURE';
+$('#scopeSwitch').textContent = scope === 'work' ? 'Switch to personal' : 'Switch to work';
+$('#scopeSwitch').href = scope === 'work' ? '/capture' : '/work';
+$('#captureDestination').textContent = inboxName;
 
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js').then(reg=>reg.update()).catch(()=>{});
-}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').then(registration => registration.update()).catch(() => {});
 renderRecent();
-updateBatchUI();
+runQueue();
+refreshStatuses();
+setInterval(refreshStatuses, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { runQueue(); refreshStatuses(); } });
