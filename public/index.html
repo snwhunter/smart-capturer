@@ -24,13 +24,15 @@
     </header>
 
     <section class="card capture-card">
-      <div id="launchContext" class="launch-context hidden">
+      <div id="launchContext" class="launch-context hidden" role="status" aria-live="polite">
+        <div class="launch-context-icon" aria-hidden="true">!</div>
         <div>
           <span id="launchContextType" class="eyebrow">PRELOADED CONTEXT</span>
           <strong id="launchContextName"></strong>
+          <span id="launchContextInstruction" class="launch-context-instruction"></span>
           <span id="launchContextMeta" class="launch-context-meta"></span>
         </div>
-        <button id="clearLaunchContext" class="clear-context" type="button">Clear</button>
+        <button id="clearLaunchContext" class="clear-context" type="button">Wrong assignment</button>
       </div>
       <div class="mode-grid">
         <button class="mode active" data-mode="image">📷<span>Image</span></button>
@@ -39,7 +41,7 @@
       </div>
 
       <div id="imagePane" class="pane active">
-        <label class="camera-button"><span>Take photo</span><input id="cameraInput" type="file" accept="image/*" capture="environment" hidden /></label>
+        <label class="camera-button"><span id="cameraButtonLabel">Take photo</span><input id="cameraInput" type="file" accept="image/*" capture="environment" hidden /></label>
         <label class="secondary-button">Choose photo(s)<input id="fileInput" type="file" accept="image/*" multiple hidden /></label>
         <p class="capture-route">Uploads go to <strong id="captureDestination">Personal / ToBeSorted</strong>.</p>
       </div>
