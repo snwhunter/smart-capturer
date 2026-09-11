@@ -24,6 +24,14 @@
     </header>
 
     <section class="card capture-card">
+      <div id="launchContext" class="launch-context hidden">
+        <div>
+          <span id="launchContextType" class="eyebrow">PRELOADED CONTEXT</span>
+          <strong id="launchContextName"></strong>
+          <span id="launchContextMeta" class="launch-context-meta"></span>
+        </div>
+        <button id="clearLaunchContext" class="clear-context" type="button">Clear</button>
+      </div>
       <div class="mode-grid">
         <button class="mode active" data-mode="image">📷<span>Image</span></button>
         <button class="mode" data-mode="link">🔗<span>Link</span></button>
@@ -43,7 +51,7 @@
     <section id="contextCard" class="card hidden">
       <div class="section-title"><div><span class="eyebrow">SUGGESTED CONTEXT</span><h2>Does this look right?</h2></div><span id="confidence" class="confidence"></span></div>
       <div class="form-grid">
-        <label>Category<select id="category"><option>Receipt</option><option>Recipe</option><option>Work Photo</option><option>Old Photo / Archive</option><option>Vehicle</option><option>Other</option></select></label>
+        <label>Category<select id="category"><option>Receipt</option><option>Recipe</option><option>Homework</option><option>Work Photo</option><option>Old Photo / Archive</option><option>Vehicle</option><option>Other</option></select></label>
         <label>Title<input id="title" /></label>
         <label class="wide">Context<textarea id="context" rows="4"></textarea></label>
         <label>Tags<input id="tags" placeholder="comma, separated" /></label>
