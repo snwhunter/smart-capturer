@@ -34,6 +34,6 @@ substitutions:
   _REPOSITORY: smart-capturer
   _STORAGE_BUCKET: hunter-apps-smart-capturer
   _DRIVE_FOLDER_ID: '1lWnM2jmuLI2qrk4aR80KjlRWTe8hnXdN'
-  _WORK_DRIVE_FOLDER_ID: ''
+  _WORK_DRIVE_FOLDER_ID: '1sB-VtHJoZ3KtgqwS52BOUndWxbavsUyU'
 options:
   logging: CLOUD_LOGGING_ONLY
