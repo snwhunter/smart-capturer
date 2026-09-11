@@ -54,6 +54,11 @@ function validCaptureId(value){
   return typeof value === 'string' && /^[a-zA-Z0-9-]{10,120}$/.test(value);
 }
 
+function validHttpUrl(value){
+  try { return ['http:','https:'].includes(new URL(value).protocol); }
+  catch { return false; }
+}
+
 async function bodyJson(req, limit=30*1024*1024){
   let size=0;
   const chunks=[];
@@ -159,6 +164,9 @@ async function saveCapture(p){
   if(record.kind==='image' && incomingFiles.length===0 && !metadataOnly){
     throw new Error('Image capture contained no image files.');
   }
+  if(record.kind==='link' && !validHttpUrl(record.original_text)) throw new ValidationError('Enter a valid link beginning with http:// or https://.');
+  if(record.kind==='data' && (typeof record.original_text!=='string' || !record.original_text.trim())) throw new ValidationError('Data records cannot be empty.');
+  if(typeof record.original_text==='string' && record.original_text.length>200000) throw new ValidationError('Link or data capture is too large.');
 
   if(scope==='work' && personalDriveStore.configured && !workDriveStore.configured){
     throw new Error('The work ToBeSorted folder is not configured yet.');
@@ -273,13 +281,64 @@ async function saveCapture(p){
 
 const patchFields=new Set([
   'workflow_status','recognition_status','destination','category','title','context','tags',
-  'confidence','destination_hint','extracted','analysis_source','analyzed_at','message'
+  'confidence','destination_hint','extracted','analysis_source','analyzed_at','message',
+  'processing_status','review_status'
 ]);
 
-function cleanStatusPatch(value){
+class ValidationError extends Error {}
+
+const statusValues={
+  workflow_status:new Set(['to_be_sorted','processing','reviewed','sorted','failed']),
+  recognition_status:new Set(['pending','recognized','failed','not_run']),
+  processing_status:new Set(['queued','processing','complete','waiting_for_ai','failed']),
+  review_status:new Set(['pending','validated','rejected'])
+};
+
+const textLimits={
+  destination:500,category:100,title:300,context:10000,destination_hint:500,
+  analysis_source:100,analyzed_at:100,message:1000,original_text:200000
+};
+
+function validatedFields(value,allowedFields){
+  if(!value || typeof value!=='object' || Array.isArray(value)) throw new ValidationError('Record changes must be an object.');
   const clean={};
-  if(!value || typeof value!=='object' || Array.isArray(value)) return clean;
-  for(const [key,item] of Object.entries(value)) if(patchFields.has(key)) clean[key]=item;
+  for(const [key,item] of Object.entries(value)){
+    if(!allowedFields.has(key)) continue;
+    if(statusValues[key]){
+      if(typeof item!=='string' || !statusValues[key].has(item)) throw new ValidationError(`Invalid ${key}.`);
+    } else if(key==='tags'){
+      if(!Array.isArray(item) || item.length>20 || item.some(tag=>typeof tag!=='string' || !tag.trim() || tag.length>100)) throw new ValidationError('Tags must be a list of up to 20 short labels.');
+      clean[key]=[...new Set(item.map(tag=>tag.trim()))];
+      continue;
+    } else if(key==='confidence'){
+      if(typeof item!=='number' || !Number.isFinite(item) || item<0 || item>1) throw new ValidationError('Confidence must be between 0 and 1.');
+    } else if(key==='extracted'){
+      if(!item || typeof item!=='object' || Array.isArray(item) || JSON.stringify(item).length>100000) throw new ValidationError('Extracted data must be a reasonably sized object.');
+    } else {
+      const limit=textLimits[key];
+      if(typeof item!=='string' || (limit && item.length>limit)) throw new ValidationError(`Invalid ${key}.`);
+    }
+    clean[key]=item;
+  }
+  return clean;
+}
+
+function cleanStatusPatch(value){
+  return validatedFields(value,patchFields);
+}
+
+const editorFields=new Set(['destination','category','title','context','tags','original_text']);
+
+function cleanEditorPatch(value,current){
+  const clean=validatedFields(value,editorFields);
+  if(!Object.keys(clean).length) throw new ValidationError('No editable record fields were provided.');
+  if(!clean.title?.trim()) throw new ValidationError('Title is required.');
+  if(!clean.category?.trim()) throw new ValidationError('Category is required.');
+  if(!clean.destination?.trim()) throw new ValidationError('Destination is required.');
+  if(current.kind==='link'){
+    if(!validHttpUrl(clean.original_text)) throw new ValidationError('Enter a valid link beginning with http:// or https://.');
+  }
+  if(current.kind==='data' && !clean.original_text?.trim()) throw new ValidationError('Data records cannot be empty.');
   return clean;
 }
 
@@ -302,12 +361,43 @@ async function updateCapture(id,scope,patch){
   return record;
 }
 
+async function processCapture(id,scope){
+  const current=await readCapture(id,scope);
+  if(!current) return null;
+  if(!['link','data'].includes(current.kind)) throw new ValidationError('Backend text processing is available for link and data records.');
+  await updateCapture(id,scope,{processing_status:'processing',message:'Backend processing started'});
+  try {
+    const base=fallbackContext({kind:current.kind,text:current.original_text||'',filename:''});
+    const result=await analyzer.analyze({kind:current.kind,text:current.original_text||''},base);
+    const recognized=result.source==='gemini' || result.source==='openai';
+    const locked=Boolean(current.context_locked);
+    const tags=[...new Set([...(locked && Array.isArray(current.tags) ? current.tags : []),...(Array.isArray(result.tags) ? result.tags : [])])];
+    return await updateCapture(id,scope,{
+      category:locked && current.category ? current.category : result.category,
+      title:locked && current.title ? current.title : result.title,
+      context:locked && current.context ? current.context : result.context,
+      tags,
+      confidence:result.confidence,
+      destination_hint:result.destination_hint,
+      extracted:result.extracted,
+      analysis_source:result.source,
+      analyzed_at:new Date().toISOString(),
+      recognition_status:recognized?'recognized':'not_run',
+      processing_status:recognized?'complete':'waiting_for_ai',
+      message:recognized?`Backend recognized this as ${result.category}`:'Saved; awaiting backend AI recognition'
+    });
+  } catch(error){
+    await updateCapture(id,scope,{processing_status:'failed',recognition_status:'failed',message:'Saved; backend processing failed'});
+    throw error;
+  }
+}
+
 async function api(req,res,url){
   if(req.method==='GET' && url.pathname==='/api/health'){
     return json(res,200,{
       ok:true,
       app:'Smart Capturer',
-      revision:4,
+      revision:5,
       auth_required:Boolean(accessKey),
       storage:personalDriveStore.configured?'google-drive':storageBucket?'gcs':'local-development',
       scopes:{personal:true,work:workDriveStore.configured||Boolean(storageBucket)||!personalDriveStore.configured},
@@ -328,6 +418,12 @@ async function api(req,res,url){
     return json(res,200,await saveCapture(await bodyJson(req)));
   }
 
+  const processMatch=url.pathname.match(/^\/api\/captures\/([a-zA-Z0-9-]{10,120})\/process$/);
+  if(processMatch && req.method==='POST'){
+    const record=await processCapture(processMatch[1],captureScope(url.searchParams.get('scope')));
+    return record ? json(res,200,{ok:true,record}) : json(res,404,{error:'Capture not found'});
+  }
+
   const statusMatch=url.pathname.match(/^\/api\/captures\/([a-zA-Z0-9-]{10,120})$/);
   if(statusMatch && req.method==='GET'){
     const record=await readCapture(statusMatch[1],captureScope(url.searchParams.get('scope')));
@@ -339,13 +435,28 @@ async function api(req,res,url){
     const record=await updateCapture(statusMatch[1],captureScope(url.searchParams.get('scope')),patch);
     return record ? json(res,200,{ok:true,record}) : json(res,404,{error:'Capture not found'});
   }
+  if(statusMatch && req.method==='PUT'){
+    const scope=captureScope(url.searchParams.get('scope'));
+    const current=await readCapture(statusMatch[1],scope);
+    if(!current) return json(res,404,{error:'Capture not found'});
+    const edits=cleanEditorPatch(await bodyJson(req,2*1024*1024),current);
+    const rawChanged=edits.original_text!==current.original_text;
+    let record=await updateCapture(statusMatch[1],scope,{
+      ...edits,review_status:'validated',workflow_status:'reviewed',
+      processing_status:rawChanged?'queued':current.processing_status,
+      recognition_status:rawChanged?'pending':current.recognition_status,
+      message:rawChanged?'Edits validated; backend reprocessing started':'Record edits validated and saved'
+    });
+    if(rawChanged && ['link','data'].includes(current.kind)) record=await processCapture(statusMatch[1],scope);
+    return json(res,200,{ok:true,record});
+  }
 
   return json(res,404,{error:'Not found'});
 }
 
 async function serve(req,res,url){
   let rel=decodeURIComponent(url.pathname);
-  if(rel==='/' || rel==='/capture' || rel==='/work') rel='/index.html';
+  if(rel==='/' || rel==='/capture' || rel==='/work' || /^\/record\/[a-zA-Z0-9-]{10,120}$/.test(rel)) rel='/index.html';
   const target=path.normalize(path.join(publicDir,rel));
   if(!target.startsWith(publicDir)){
     res.writeHead(403);
@@ -353,9 +464,11 @@ async function serve(req,res,url){
   }
   try{
     const b=await fs.readFile(target);
+    const extension=path.extname(target);
+    const mustRevalidate=rel==='/index.html' || ['.js','.css','.webmanifest'].includes(extension);
     res.writeHead(200,{
-      'content-type':mime[path.extname(target)]||'application/octet-stream',
-      'cache-control':rel==='/index.html'?'no-cache':'public, max-age=3600'
+      'content-type':mime[extension]||'application/octet-stream',
+      'cache-control':mustRevalidate?'no-cache':'public, max-age=3600'
     });
     res.end(b);
   } catch {
@@ -371,7 +484,7 @@ const server=http.createServer(async(req,res)=>{
     else await serve(req,res,url);
   } catch(e){
     console.error(e);
-    json(res,500,{error:e.message});
+    json(res,e instanceof ValidationError?400:500,{error:e.message});
   }
 });
 
