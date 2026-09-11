@@ -1,9 +1,11 @@
-import { captureButtonLabel, clearLaunchContext, launchSearchForPath, parseLaunchContext } from './launch-context.js';
+import { captureButtonLabel, clearLaunchContext, launchSearchForPath, parseLaunchContext } from './launch-context.js?v=5';
 
 const $ = selector => document.querySelector(selector);
 const launchParams = new URLSearchParams(location.search);
 const scope = location.pathname.startsWith('/work') || launchParams.get('scope') === 'work'
   ? 'work' : 'personal';
+const recordMatch = location.pathname.match(/^\/record\/([a-zA-Z0-9-]{10,120})$/);
+const recordId = recordMatch?.[1] || '';
 const inboxName = scope === 'work' ? 'Work / ToBeSorted' : 'Personal / ToBeSorted';
 const recentKey = `smartCapturerRecent:${scope}`;
 
@@ -163,11 +165,39 @@ async function enqueueImages(files) {
   runQueue();
 }
 
+async function enqueueText(kind, text) {
+  if (!text) return setStatus(`Enter ${kind === 'link' ? 'a link' : 'some data'} first.`);
+  if (text.length > 200000) return setStatus('This item is too large. Keep link or data captures under 200,000 characters.');
+  const id = makeCaptureId();
+  const contextName = state.launchContext?.assignment_name || state.launchContext?.context || '';
+  const title = state.launchContext?.title || (kind === 'link' ? text.slice(0, 300) : text.replace(/\s+/g, ' ').slice(0, 80)) || `New ${kind}`;
+  const entry = {
+    id, scope, kind, created_at: new Date().toISOString(), thumbnail: '', title,
+    context: state.launchContext?.context || '', external_ref: state.launchContext?.external_ref || '',
+    category: state.launchContext?.category || 'Unsorted', destination: inboxName,
+    upload_status: 'queued', recognition_status: 'pending', processing_status: 'queued', workflow_status: 'to_be_sorted',
+    message: `Waiting to save ${kind}`
+  };
+  upsertRecent(entry);
+  if (kind === 'link') $('#linkInput').value = '';
+  else $('#dataInput').value = '';
+  setStatus(`${kind === 'link' ? 'Link' : 'Data'} queued${contextName ? ` for ${contextName}` : ''}. Ready for the next item.`);
+  try {
+    await queuePut({
+      id, scope, kind, text, created_at: entry.created_at,
+      launch_context: state.launchContext ? { ...state.launchContext, tags: [...state.launchContext.tags] } : null
+    });
+    runQueue();
+  } catch {
+    upsertRecent({ id, upload_status: 'failed', recognition_status: 'not_run', message: `Could not queue this ${kind}` });
+  }
+}
+
 let activeWorkers = 0;
 async function runQueue() {
   if (activeWorkers >= 2) return;
   const jobs = await queueAll().catch(() => []);
-  const available = jobs.filter(job => job.scope === scope && !state.processing.has(job.id));
+  const available = jobs.filter(job => job.scope === scope && !state.processing.has(job.id) && (!job.next_attempt_at || job.next_attempt_at <= Date.now()));
   while (activeWorkers < 2 && available.length) {
     const job = available.shift();
     activeWorkers += 1;
@@ -181,29 +211,71 @@ async function runQueue() {
 }
 
 async function processJob(job) {
+  const kind = job.kind || 'image';
+  let stored = job.stage === 'saved';
+  if (kind !== 'image' && job.stage === 'saved') {
+    try {
+      await processSavedRecord(job);
+      await queueDelete(job.id);
+    } catch {
+      const attempts = (job.attempts || 0) + 1;
+      const delay = Math.min(60000, 5000 * 2 ** Math.min(attempts - 1, 4));
+      await queuePut({ ...job, attempts, next_attempt_at: Date.now() + delay });
+      setTimeout(runQueue, delay);
+    }
+    return;
+  }
   upsertRecent({ id: job.id, upload_status: 'uploading', message: `Uploading to ${inboxName}` });
   try {
-    const file = await filePayload(job.file, job.name, job.type);
+    const file = kind === 'image' ? await filePayload(job.file, job.name, job.type) : null;
+    const launch = job.launch_context || {};
     const saved = await responseJsonOrThrow(await apiFetch('/api/save', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         capture_id: job.id, scope,
         metadata: {
-          kind: 'image', capture_status: 'saved', workflow_status: 'to_be_sorted',
-          recognition_status: 'pending', destination: inboxName, original_filename: job.name,
-          ...(job.launch_context || {})
+          kind, capture_status: 'saved', workflow_status: 'to_be_sorted',
+          recognition_status: 'pending', processing_status: kind === 'image' ? undefined : 'queued', destination: inboxName,
+          original_filename: kind === 'image' ? job.name : undefined,
+          original_text: kind === 'image' ? undefined : job.text,
+          context_locked: Boolean(job.launch_context),
+          title: launch.title || (kind === 'link' ? job.text?.slice(0, 300) : job.text?.replace(/\s+/g, ' ').slice(0, 80)),
+          category: launch.category || 'Unsorted',
+          ...launch
         },
-        files: [file]
+        files: file ? [file] : []
       })
     }));
     upsertRecent({
       id: job.id, upload_status: 'saved', destination: saved.destination || inboxName,
       file_count: saved.file_count, bytes_saved: saved.bytes_saved, message: `Saved in ${saved.destination || inboxName}`
     });
-    await queueDelete(job.id);
-    await analyzeQueued(job, file);
+    stored = true;
+    if (kind === 'image') {
+      await queueDelete(job.id);
+      await analyzeQueued(job, file);
+    } else {
+      await queuePut({ ...job, stage: 'saved', attempts: 0, next_attempt_at: 0 });
+      await processSavedRecord(job);
+      await queueDelete(job.id);
+    }
   } catch (error) {
+    if (stored && kind !== 'image') return;
     upsertRecent({ id: job.id, upload_status: 'failed', recognition_status: 'not_run', message: error.message });
+  }
+}
+
+async function processSavedRecord(job) {
+  upsertRecent({ id: job.id, workflow_status: 'processing', recognition_status: 'pending', message: 'Saved; backend processing started' });
+  try {
+    const result = await responseJsonOrThrow(await apiFetch(`/api/captures/${job.id}/process?scope=${scope}`, {
+      method: 'POST', keepalive: true
+    }));
+    const record = result.record || {};
+    upsertRecent({ id: job.id, ...record, upload_status: 'saved', message: record.message || 'Backend processing complete' });
+  } catch (error) {
+    upsertRecent({ id: job.id, upload_status: 'saved', processing_status: 'failed', workflow_status: 'to_be_sorted', recognition_status: 'failed', message: `Saved; backend processing will retry: ${error.message}` });
+    throw error;
   }
 }
 
@@ -252,7 +324,9 @@ async function refreshStatuses() {
         category: record.category || item.category,
         destination: record.destination || item.destination,
         recognition_status: record.recognition_status || item.recognition_status,
+        processing_status: record.processing_status || item.processing_status,
         workflow_status: record.workflow_status || item.workflow_status,
+        review_status: record.review_status || item.review_status,
         message: record.message || item.message
       });
     } catch {}
@@ -266,17 +340,38 @@ function renderRecent() {
     const recognition = item.recognition_status === 'recognized' ? `Recognized${item.category ? `: ${item.category}` : ''}`
       : item.recognition_status === 'failed' ? 'Recognition failed'
       : item.recognition_status === 'not_run' ? 'Recognition waiting' : 'Recognition pending';
-    return `<article class="recent-item ${esc(item.upload_status || 'queued')}">
-      <div class="recent-thumb">${item.thumbnail?.startsWith('data:image/') ? `<img src="${esc(item.thumbnail)}" alt="Capture thumbnail">` : '<span>📷</span>'}</div>
+    const icon = item.kind === 'link' ? '🔗' : item.kind === 'data' ? '✍️' : '📷';
+    const saved = item.upload_status === 'saved';
+    const tag = saved ? 'a' : 'article';
+    const href = saved ? ` href="${esc(recordHref(item.id))}"` : '';
+    return `<${tag} class="recent-item ${esc(item.upload_status || 'queued')}"${href}>
+      <div class="recent-thumb">${item.thumbnail?.startsWith('data:image/') ? `<img src="${esc(item.thumbnail)}" alt="Capture thumbnail">` : `<span>${icon}</span>`}</div>
       <div class="recent-body"><strong>${esc(item.title || 'Photo')}</strong>
-        <span class="recent-meta">${esc(upload)} · ${esc(recognition)}</span>
+        <span class="recent-meta">${esc(upload)} · ${esc(recognition)} · ${esc(workflowLabel(item))}</span>
         ${item.context ? `<span class="recent-context">${esc(item.context)}</span>` : ''}
         <span class="recent-destination">${esc(item.destination || inboxName)}</span>
         ${item.message ? `<span class="recent-message">${esc(item.message)}</span>` : ''}
       </div>
       <time>${new Date(item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
-    </article>`;
+    </${tag}>`;
   }).join('') : '<p class="muted">Nothing captured yet.</p>';
+}
+
+function workflowLabel(item) {
+  if (item.review_status === 'validated') return 'Edits validated';
+  if (item.processing_status === 'processing') return 'Backend processing';
+  if (item.processing_status === 'complete') return 'AI processed';
+  if (item.processing_status === 'waiting_for_ai') return 'Awaiting AI';
+  if (item.processing_status === 'failed') return 'Processing failed';
+  if (item.workflow_status === 'reviewed') return 'Reviewed';
+  if (item.workflow_status === 'sorted') return 'Sorted';
+  return 'To be sorted';
+}
+
+function recordHref(id) {
+  const params = new URLSearchParams(launchParams);
+  params.set('scope', scope);
+  return `/record/${encodeURIComponent(id)}?${params}`;
 }
 
 const modes = [...document.querySelectorAll('.mode')];
@@ -292,8 +387,8 @@ function setMode(mode) {
 
 $('#cameraInput').addEventListener('change', event => enqueueImages([...event.target.files]));
 $('#fileInput').addEventListener('change', event => enqueueImages([...event.target.files]));
-$('#analyzeLink').addEventListener('click', () => analyzeText('link', $('#linkInput').value.trim()));
-$('#analyzeData').addEventListener('click', () => analyzeText('data', $('#dataInput').value.trim()));
+$('#analyzeLink').addEventListener('click', () => enqueueText('link', $('#linkInput').value.trim()));
+$('#analyzeData').addEventListener('click', () => enqueueText('data', $('#dataInput').value.trim()));
 
 async function analyzeText(kind, text) {
   if (!text) return;
@@ -414,9 +509,82 @@ $('#clearLaunchContext').addEventListener('click', () => {
   setStatus('Preloaded context cleared. New captures will be unsorted.');
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').then(registration => registration.update()).catch(() => {});
+let openRecord = null;
+
+async function loadRecordDetails() {
+  if (!recordId) return;
+  document.body.classList.add('record-mode');
+  $('#recordCard').classList.remove('hidden');
+  $('#scopeSwitch').classList.add('hidden');
+  $('#scopeName').textContent = 'CAPTURE RECORD';
+  $('#recordBack').href = `${scope === 'work' ? '/work' : '/capture'}${launchSearchForPath(launchParams)}`;
+  try {
+    const result = await responseJsonOrThrow(await apiFetch(`/api/captures/${recordId}?scope=${scope}`));
+    showRecord(result.record);
+  } catch (error) {
+    $('#recordHeading').textContent = 'Could not load record';
+    setRecordSaveStatus(error.message, true);
+  }
+}
+
+function showRecord(record) {
+  openRecord = record;
+  $('#recordHeading').textContent = record.title || record.context || 'Record details';
+  $('#recordKind').value = record.kind || 'unknown';
+  const category = record.category || 'Unsorted';
+  if (![...$('#recordCategory').options].some(option => option.value === category)) {
+    $('#recordCategory').add(new Option(category, category));
+  }
+  $('#recordCategory').value = category;
+  $('#recordTitle').value = record.title || '';
+  $('#recordOriginal').value = record.original_text || '';
+  $('#recordOriginal').readOnly = record.kind === 'image';
+  $('#recordContext').value = record.context || '';
+  $('#recordTags').value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
+  $('#recordDestination').value = record.destination || inboxName;
+  $('#recordStatusBadge').textContent = workflowLabel(record);
+  const identity = [record.source, record.assignment_name, record.external_ref].filter(Boolean).join(' · ');
+  $('#recordIdentity').textContent = identity;
+  $('#recordIdentity').classList.toggle('hidden', !identity);
+  document.title = `${record.title || record.context || 'Capture record'} · Smart Capturer`;
+}
+
+function setRecordSaveStatus(text, failed = false) {
+  $('#recordSaveStatus').textContent = text;
+  $('#recordSaveStatus').classList.remove('hidden');
+  $('#recordSaveStatus').classList.toggle('failed-status', failed);
+}
+
+$('#saveRecord').addEventListener('click', async () => {
+  if (!recordId || !openRecord) return;
+  const edits = {
+    category: $('#recordCategory').value,
+    title: $('#recordTitle').value,
+    original_text: $('#recordOriginal').value,
+    context: $('#recordContext').value,
+    tags: $('#recordTags').value.split(',').map(value => value.trim()).filter(Boolean),
+    destination: $('#recordDestination').value
+  };
+  try {
+    $('#saveRecord').disabled = true;
+    setRecordSaveStatus('Validating edits…');
+    const result = await responseJsonOrThrow(await apiFetch(`/api/captures/${recordId}?scope=${scope}`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(edits)
+    }));
+    showRecord(result.record);
+    upsertRecent({ ...result.record, id: recordId, upload_status: 'saved', created_at: result.record.created_at || new Date().toISOString() });
+    setRecordSaveStatus('Edits validated and saved by the backend.');
+  } catch (error) {
+    setRecordSaveStatus(`Could not save: ${error.message}`, true);
+  } finally {
+    $('#saveRecord').disabled = false;
+  }
+});
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=6').then(registration => registration.update()).catch(() => {});
 renderRecent();
 renderLaunchContext();
+loadRecordDetails();
 runQueue();
 refreshStatuses();
 setInterval(refreshStatuses, 15000);
