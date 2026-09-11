@@ -1,5 +1,8 @@
+import { clearLaunchContext, launchSearchForPath, parseLaunchContext } from './launch-context.js';
+
 const $ = selector => document.querySelector(selector);
-const scope = location.pathname.startsWith('/work') || new URLSearchParams(location.search).get('scope') === 'work'
+const launchParams = new URLSearchParams(location.search);
+const scope = location.pathname.startsWith('/work') || launchParams.get('scope') === 'work'
   ? 'work' : 'personal';
 const inboxName = scope === 'work' ? 'Work / ToBeSorted' : 'Personal / ToBeSorted';
 const recentKey = `smartCapturerRecent:${scope}`;
@@ -8,6 +11,7 @@ const state = {
   mode: 'image',
   text: '',
   analysis: null,
+  launchContext: parseLaunchContext(launchParams),
   accessKey: localStorage.getItem('smartCapturerAccessKey') || '',
   processing: new Set()
 };
@@ -135,15 +139,22 @@ async function enqueueImages(files) {
   for (const file of images) {
     const id = makeCaptureId();
     const entry = {
-      id, scope, created_at: new Date().toISOString(), thumbnail: '', title: file.name || 'Photo',
-      category: 'Unsorted', destination: inboxName, upload_status: 'queued', recognition_status: 'pending',
+      id, scope, created_at: new Date().toISOString(), thumbnail: '',
+      title: state.launchContext?.title || file.name || 'Photo',
+      context: state.launchContext?.context || '',
+      external_ref: state.launchContext?.external_ref || '',
+      category: state.launchContext?.category || 'Unsorted', destination: inboxName, upload_status: 'queued', recognition_status: 'pending',
       workflow_status: 'to_be_sorted', message: 'Waiting to upload'
     };
     upsertRecent(entry);
     const thumbnail = await thumbnailFor(file);
     upsertRecent({ id, thumbnail });
     try {
-      await queuePut({ id, scope, file, name: file.name || 'capture.jpg', type: file.type || 'image/jpeg', created_at: entry.created_at });
+      await queuePut({
+        id, scope, file, name: file.name || 'capture.jpg', type: file.type || 'image/jpeg',
+        created_at: entry.created_at,
+        launch_context: state.launchContext ? { ...state.launchContext, tags: [...state.launchContext.tags] } : null
+      });
     } catch {
       upsertRecent({ id, upload_status: 'failed', recognition_status: 'not_run', message: 'Could not queue this photo' });
     }
@@ -178,7 +189,8 @@ async function processJob(job) {
         capture_id: job.id, scope,
         metadata: {
           kind: 'image', capture_status: 'saved', workflow_status: 'to_be_sorted',
-          recognition_status: 'pending', destination: inboxName, original_filename: job.name
+          recognition_status: 'pending', destination: inboxName, original_filename: job.name,
+          ...(job.launch_context || {})
         },
         files: [file]
       })
@@ -202,12 +214,14 @@ async function analyzeQueued(job, file) {
     }));
     const succeeded = result.source === 'gemini' || result.source === 'openai';
     const recognitionStatus = succeeded ? 'recognized' : result.source === 'local-fallback' ? 'not_run' : 'failed';
+    const launch = job.launch_context || {};
+    const tags = [...new Set([...(launch.tags || []), ...(Array.isArray(result.tags) ? result.tags : [])])];
     const patch = {
       recognition_status: recognitionStatus,
-      category: result.category,
-      title: result.title,
-      context: result.context,
-      tags: result.tags,
+      category: launch.category || result.category,
+      title: launch.title || result.title,
+      context: launch.context || result.context,
+      tags,
       confidence: result.confidence,
       destination_hint: result.destination_hint,
       extracted: result.extracted,
@@ -255,6 +269,7 @@ function renderRecent() {
       <div class="recent-thumb">${item.thumbnail?.startsWith('data:image/') ? `<img src="${esc(item.thumbnail)}" alt="Capture thumbnail">` : '<span>📷</span>'}</div>
       <div class="recent-body"><strong>${esc(item.title || 'Photo')}</strong>
         <span class="recent-meta">${esc(upload)} · ${esc(recognition)}</span>
+        ${item.context ? `<span class="recent-context">${esc(item.context)}</span>` : ''}
         <span class="recent-destination">${esc(item.destination || inboxName)}</span>
         ${item.message ? `<span class="recent-message">${esc(item.message)}</span>` : ''}
       </div>
@@ -294,11 +309,19 @@ async function analyzeText(kind, text) {
 }
 
 function fillContext(result) {
-  state.analysis = result;
-  $('#category').value = [...$('#category').options].some(option => option.value === result.category) ? result.category : 'Other';
-  $('#title').value = result.title || '';
-  $('#context').value = result.context || '';
-  $('#tags').value = Array.isArray(result.tags) ? result.tags.join(', ') : '';
+  const launch = state.launchContext || {};
+  const merged = {
+    ...result,
+    category: launch.category || result.category,
+    title: launch.title || result.title,
+    context: launch.context || result.context,
+    tags: [...new Set([...(launch.tags || []), ...(Array.isArray(result.tags) ? result.tags : [])])]
+  };
+  state.analysis = merged;
+  $('#category').value = [...$('#category').options].some(option => option.value === merged.category) ? merged.category : 'Other';
+  $('#title').value = merged.title || '';
+  $('#context').value = merged.context || '';
+  $('#tags').value = merged.tags.join(', ');
   $('#destination').value = result.destination_hint || inboxName;
   $('#confidence').textContent = `${Math.round((result.confidence || 0) * 100)}% guess`;
   $('#contextCard').classList.remove('hidden');
@@ -310,7 +333,8 @@ $('#saveCapture').addEventListener('click', async () => {
     context: $('#context').value, tags: $('#tags').value.split(',').map(value => value.trim()).filter(Boolean),
     destination: $('#destination').value || inboxName, original_text: state.text,
     recognition_status: state.analysis?.source === 'gemini' || state.analysis?.source === 'openai' ? 'recognized' : 'not_run',
-    analysis_source: state.analysis?.source || 'none', extracted: state.analysis?.extracted || {}
+    analysis_source: state.analysis?.source || 'none', extracted: state.analysis?.extracted || {},
+    ...(state.launchContext || {})
   };
   try {
     $('#saveCapture').disabled = true;
@@ -357,11 +381,30 @@ function esc(value = '') {
 
 $('#scopeName').textContent = scope === 'work' ? 'WORK CAPTURE' : 'PERSONAL CAPTURE';
 $('#scopeSwitch').textContent = scope === 'work' ? 'Switch to personal' : 'Switch to work';
-$('#scopeSwitch').href = scope === 'work' ? '/capture' : '/work';
+$('#scopeSwitch').href = `${scope === 'work' ? '/capture' : '/work'}${launchSearchForPath(launchParams)}`;
 $('#captureDestination').textContent = inboxName;
+
+function renderLaunchContext() {
+  const card = $('#launchContext');
+  if (!state.launchContext) return card.classList.add('hidden');
+  $('#launchContextType').textContent = state.launchContext.assignment_name ? 'ASSIGNMENT CONTEXT' : 'PRELOADED CONTEXT';
+  $('#launchContextName').textContent = state.launchContext.context;
+  $('#launchContextMeta').textContent = [state.launchContext.category, state.launchContext.source, state.launchContext.external_ref]
+    .filter(Boolean).join(' · ');
+  card.classList.remove('hidden');
+}
+
+$('#clearLaunchContext').addEventListener('click', () => {
+  state.launchContext = null;
+  history.replaceState(null, '', `${location.pathname}${clearLaunchContext(location.search)}`);
+  $('#scopeSwitch').href = scope === 'work' ? '/capture' : '/work';
+  renderLaunchContext();
+  setStatus('Preloaded context cleared. New captures will be unsorted.');
+});
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').then(registration => registration.update()).catch(() => {});
 renderRecent();
+renderLaunchContext();
 runQueue();
 refreshStatuses();
 setInterval(refreshStatuses, 15000);
