@@ -1,8 +1,8 @@
-# Smart Capturer — Revision 3
+# Smart Capturer — Revision 5
 
 iPhone-first PWA for rapidly capturing **images, links, and data** into personal and work inboxes. Photo capture immediately returns control to the camera while upload and optional recognition continue in a resumable queue.
 
-## Rev 3
+## Rev 5
 - Rapid `capture -> use -> capture` photo loop; upload and AI never block the next capture
 - IndexedDB-backed upload queue that resumes when the app is reopened
 - Thumbnail activity log with upload, recognition, workflow, and destination status
@@ -10,6 +10,9 @@ iPhone-first PWA for rapidly capturing **images, links, and data** into personal
 - Metadata sidecars that can be updated by this app or a later folder-processing AI
 - Authenticated `GET`/`PATCH /api/captures/<capture-id>?scope=personal|work` status API
 - URL-preloaded context for tracker integrations, including an Andrew's Homework assignment shortcut
+- Immediate queue-and-log capture for images, links, and data
+- Backend link/data processing with retryable status updates
+- Clickable capture records with server-validated editing
 
 ## Existing capabilities
 - iPhone camera capture (`capture="environment"`)
@@ -32,6 +35,10 @@ The default model is `gemini-3.6-flash`, a [documented multimodal Flash model](h
 Provider requests have a 45-second timeout. Missing keys, unavailable providers, and invalid output produce editable local suggestions with a warning. There is **no automatic failover to another AI provider**. Upstream response bodies and keys are excluded from client warnings and analysis logs.
 
 The capture path enqueues each image immediately, shows its thumbnail, and makes the camera available for the next shot. Two background workers upload queued images while the app remains active; unfinished jobs remain in IndexedDB and resume the next time that personal/work URL is opened. Each capture is accompanied by a JSON metadata sidecar. The UI polls that record, so an external sorter can update recognition status and final destination either through the authenticated status API or by updating the sidecar. AI failure never prevents an image from reaching `ToBeSorted`. When Drive OAuth is not configured, the existing GCS inbox remains the fallback.
+
+Links and free-form data use the same fast path: Add immediately queues and saves the raw item, adds it to the capture log, and clears the input for the next item. The browser then keeps a backend processing request open without blocking the capture UI. Failed processing requests remain queued with bounded retry delays. When AI is disabled, the record is marked `waiting_for_ai` so a later backend or folder-processing AI can update it.
+
+Every saved log entry links to `/record/<capture-id>?scope=personal|work`. The record page displays the raw item, classification, context, tags, destination, integration identity, and processing/review status. `PUT /api/captures/<capture-id>` accepts editable record fields, validates types, lengths, tags, required fields, and HTTP(S) link syntax on the server, then marks successful edits as validated. Changing raw link/data content triggers backend reprocessing.
 
 ## Preloaded capture context
 

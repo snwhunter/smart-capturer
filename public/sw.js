@@ -1,5 +1,5 @@
-const CACHE = 'smart-capturer-v5';
-const ASSETS = ['/', '/capture', '/work', '/styles.css', '/app.js', '/launch-context.js', '/manifest.webmanifest'];
+const CACHE = 'smart-capturer-v6';
+const ASSETS = ['/', '/capture', '/work', '/styles.css?v=5', '/app.js?v=5', '/launch-context.js?v=5', '/manifest.webmanifest?v=5'];
 
 self.addEventListener('install', e => {
   self.skipWaiting();
