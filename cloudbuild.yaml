@@ -17,7 +17,7 @@ steps:
       - --platform=managed
       - --allow-unauthenticated
       - --service-account=smart-capturer@${PROJECT_ID}.iam.gserviceaccount.com
-      - --update-env-vars=STORAGE_BUCKET=${_STORAGE_BUCKET},DRIVE_FOLDER_ID=${_DRIVE_FOLDER_ID},AI_ENABLED=${_AI_ENABLED},AI_PROVIDER=${_AI_PROVIDER},GEMINI_MODEL=${_GEMINI_MODEL},OPENAI_MODEL=${_OPENAI_MODEL}
+      - --update-env-vars=STORAGE_BUCKET=${_STORAGE_BUCKET},DRIVE_FOLDER_ID=${_DRIVE_FOLDER_ID},WORK_DRIVE_FOLDER_ID=${_WORK_DRIVE_FOLDER_ID},AI_ENABLED=${_AI_ENABLED},AI_PROVIDER=${_AI_PROVIDER},GEMINI_MODEL=${_GEMINI_MODEL},OPENAI_MODEL=${_OPENAI_MODEL}
       - --update-secrets=${_AI_KEY_ENV}=${_AI_KEY_SECRET}:${_AI_KEY_VERSION},GOOGLE_DRIVE_CREDENTIALS_JSON=smart-capturer-drive-oauth:1,CAPTURE_ACCESS_KEY=smart-capturer-family-key:latest
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/smart-capturer:$COMMIT_SHA'
@@ -34,5 +34,6 @@ substitutions:
   _REPOSITORY: smart-capturer
   _STORAGE_BUCKET: hunter-apps-smart-capturer
   _DRIVE_FOLDER_ID: '1lWnM2jmuLI2qrk4aR80KjlRWTe8hnXdN'
+  _WORK_DRIVE_FOLDER_ID: ''
 options:
   logging: CLOUD_LOGGING_ONLY
