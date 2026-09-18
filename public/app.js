@@ -1,4 +1,5 @@
 import { captureButtonLabel, clearLaunchContext, launchSearchForPath, parseLaunchContext } from './launch-context.js?v=5';
+import { startDirectCamera } from './direct-camera.js?v=6';
 
 const $ = selector => document.querySelector(selector);
 const launchParams = new URLSearchParams(location.search);
@@ -581,9 +582,12 @@ $('#saveRecord').addEventListener('click', async () => {
   }
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=6').then(registration => registration.update()).catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=7').then(registration => registration.update()).catch(() => {});
 renderRecent();
 renderLaunchContext();
+if (!recordId && launchParams.get('camera') === '1') {
+  startDirectCamera({ enqueueImages, contextName: () => state.launchContext?.assignment_name || state.launchContext?.context || '' });
+}
 loadRecordDetails();
 runQueue();
 refreshStatuses();

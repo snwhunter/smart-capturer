@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="Smart Capturer" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest?v=5" />
-  <link rel="stylesheet" href="/styles.css?v=5" />
+  <link rel="stylesheet" href="/styles.css?v=6" />
   <title>Smart Capturer</title>
 </head>
 <body>
@@ -61,6 +61,13 @@
       </div>
 
       <div id="imagePane" class="pane active">
+        <div id="liveCamera" class="hidden">
+          <video id="cameraVideo" autoplay muted playsinline aria-label="Live camera preview"></video>
+          <p id="cameraStatus" role="status" aria-live="polite">Starting camera…</p>
+          <button id="cameraShutter" class="primary" type="button" disabled>Capture photo</button>
+          <button id="cameraRetry" class="secondary-button hidden" type="button">Enable camera</button>
+          <a id="cameraExit" class="secondary-button" href="/capture">Back to capture app</a>
+        </div>
         <label class="camera-button"><span id="cameraButtonLabel">Take photo</span><input id="cameraInput" type="file" accept="image/*" capture="environment" hidden /></label>
         <label class="secondary-button">Choose photo(s)<input id="fileInput" type="file" accept="image/*" multiple hidden /></label>
         <p class="capture-route">Uploads go to <strong id="captureDestination">Personal / ToBeSorted</strong>.</p>
@@ -84,6 +91,6 @@
 
     <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">CAPTURE LOG</span><h2>Recent captures</h2></div><span class="live-label">Auto-updating</span></div><div id="recentList" class="recent-list"><p class="muted">Nothing captured yet.</p></div></section>
   </main>
-  <script src="/app.js?v=5" type="module"></script>
+  <script src="/app.js?v=6" type="module"></script>
 </body>
 </html>
