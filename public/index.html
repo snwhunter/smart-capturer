@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="Smart Capturer" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest?v=5" />
-  <link rel="stylesheet" href="/styles.css?v=6" />
+  <link rel="stylesheet" href="/styles.css?v=7" />
   <title>Smart Capturer</title>
 </head>
 <body>
@@ -20,7 +20,10 @@
         <h1>Smart Capturer</h1>
         <p>Take the photo and keep moving. Upload and recognition continue in the queue.</p>
       </div>
-      <a id="scopeSwitch" class="pill scope-switch" href="/work">Switch to work</a>
+      <div class="header-actions">
+        <button id="deviceButton" class="pill device-button" type="button">Device: <span id="deviceName">Browser</span></button>
+        <a id="scopeSwitch" class="pill scope-switch" href="/work">Switch to work</a>
+      </div>
     </header>
 
     <section id="recordCard" class="card record-card hidden">
@@ -89,8 +92,10 @@
       <div class="actions"><button id="startOver" class="secondary-button">Cancel</button><button id="saveCapture" class="primary">Save capture</button></div>
     </section>
 
-    <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">CAPTURE LOG</span><h2>Recent captures</h2></div><span class="live-label">Auto-updating</span></div><div id="recentList" class="recent-list"><p class="muted">Nothing captured yet.</p></div></section>
+    <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">CAPTURE LOG</span><h2>Recent captures on this device</h2></div><span class="live-label">Auto-updating</span></div><div id="recentList" class="recent-list"><p class="muted">Nothing captured yet.</p></div></section>
+
+    <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">TO BE SORTED</span><h2>Inbox from Drive</h2></div><button id="refreshInbox" class="secondary-button compact-button" type="button">Refresh</button></div><div id="inboxList" class="recent-list"><p class="muted">Tap Refresh to read ToBeSorted.</p></div></section>
   </main>
-  <script src="/app.js?v=6" type="module"></script>
+  <script src="/app.js?v=7" type="module"></script>
 </body>
 </html>
