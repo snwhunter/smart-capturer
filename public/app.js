@@ -9,6 +9,31 @@ const recordMatch = location.pathname.match(/^\/record\/([a-zA-Z0-9-]{10,120})$/
 const recordId = recordMatch?.[1] || '';
 const inboxName = scope === 'work' ? 'Work / ToBeSorted' : 'Personal / ToBeSorted';
 const recentKey = `smartCapturerRecent:${scope}`;
+const deviceIdKey = 'smartCapturerDeviceId';
+const deviceNameKey = 'smartCapturerDeviceName';
+
+function defaultDeviceName() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone/i.test(ua)) return 'iPhone';
+  if (/iPad/i.test(ua)) return 'iPad';
+  if (/Android/i.test(ua)) return 'Android device';
+  if (/Windows/i.test(ua)) return 'Windows PC';
+  if (/Macintosh|Mac OS X/i.test(ua)) return 'Mac';
+  return 'Browser';
+}
+
+function loadDeviceIdentity() {
+  let id = localStorage.getItem(deviceIdKey) || '';
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(deviceIdKey, id);
+  }
+  const name = localStorage.getItem(deviceNameKey) || defaultDeviceName();
+  if (!localStorage.getItem(deviceNameKey)) localStorage.setItem(deviceNameKey, name);
+  return { id, name };
+}
+
+const initialDevice = loadDeviceIdentity();
 
 const state = {
   mode: 'image',
@@ -16,6 +41,8 @@ const state = {
   analysis: null,
   launchContext: parseLaunchContext(launchParams),
   accessKey: localStorage.getItem('smartCapturerAccessKey') || '',
+  deviceId: initialDevice.id,
+  deviceName: initialDevice.name,
   processing: new Set()
 };
 
@@ -144,6 +171,7 @@ async function enqueueImages(files) {
     const id = makeCaptureId();
     const entry = {
       id, scope, created_at: new Date().toISOString(), thumbnail: '',
+      device_id: state.deviceId, device_name: state.deviceName,
       title: state.launchContext?.title || file.name || 'Photo',
       context: state.launchContext?.context || '',
       external_ref: state.launchContext?.external_ref || '',
@@ -157,6 +185,7 @@ async function enqueueImages(files) {
       await queuePut({
         id, scope, file, name: file.name || 'capture.jpg', type: file.type || 'image/jpeg',
         created_at: entry.created_at,
+        device_id: state.deviceId, device_name: state.deviceName,
         launch_context: state.launchContext ? { ...state.launchContext, tags: [...state.launchContext.tags] } : null
       });
     } catch {
@@ -174,6 +203,7 @@ async function enqueueText(kind, text) {
   const title = state.launchContext?.title || (kind === 'link' ? text.slice(0, 300) : text.replace(/\s+/g, ' ').slice(0, 80)) || `New ${kind}`;
   const entry = {
     id, scope, kind, created_at: new Date().toISOString(), thumbnail: '', title,
+    device_id: state.deviceId, device_name: state.deviceName,
     context: state.launchContext?.context || '', external_ref: state.launchContext?.external_ref || '',
     category: state.launchContext?.category || 'Unsorted', destination: inboxName,
     upload_status: 'queued', recognition_status: 'pending', processing_status: 'queued', workflow_status: 'to_be_sorted',
@@ -186,6 +216,7 @@ async function enqueueText(kind, text) {
   try {
     await queuePut({
       id, scope, kind, text, created_at: entry.created_at,
+      device_id: state.deviceId, device_name: state.deviceName,
       launch_context: state.launchContext ? { ...state.launchContext, tags: [...state.launchContext.tags] } : null
     });
     runQueue();
@@ -236,6 +267,7 @@ async function processJob(job) {
         capture_id: job.id, scope,
         metadata: {
           kind, capture_status: 'saved', workflow_status: 'to_be_sorted',
+          device_id: job.device_id || state.deviceId, device_name: job.device_name || state.deviceName,
           recognition_status: 'pending', processing_status: kind === 'image' ? undefined : 'queued', destination: inboxName,
           original_filename: kind === 'image' ? job.name : undefined,
           original_text: kind === 'image' ? undefined : job.text,
@@ -334,6 +366,34 @@ async function refreshStatuses() {
   }
 }
 
+async function loadInbox() {
+  const list = $('#inboxList');
+  const button = $('#refreshInbox');
+  button.disabled = true;
+  list.innerHTML = '<p class="muted">Reading ToBeSorted…</p>';
+  try {
+    const result = await responseJsonOrThrow(await apiFetch(`/api/captures?scope=${scope}&limit=50`));
+    const records = Array.isArray(result.records) ? result.records : [];
+    list.innerHTML = records.length ? records.map(record => {
+      const icon = record.kind === 'link' ? '🔗' : record.kind === 'data' ? '✍️' : '📷';
+      const device = record.device_name || (record.device_id ? 'Unknown device' : 'Legacy capture');
+      return `<a class="recent-item saved" href="${esc(recordHref(record.id))}">
+        <div class="recent-thumb"><span>${icon}</span></div>
+        <div class="recent-body"><strong>${esc(record.title || record.context || 'Capture')}</strong>
+          <span class="recent-meta">${esc(workflowLabel(record))} · ${esc(device)}</span>
+          ${record.context ? `<span class="recent-context">${esc(record.context)}</span>` : ''}
+          <span class="recent-destination">${esc(record.destination || inboxName)}</span>
+        </div>
+        <time>${record.created_at ? new Date(record.created_at).toLocaleString([], { month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit' }) : ''}</time>
+      </a>`;
+    }).join('') : '<p class="muted">ToBeSorted is empty.</p>';
+  } catch (error) {
+    list.innerHTML = `<p class="muted">Could not read ToBeSorted: ${esc(error.message)}</p>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderRecent() {
   const items = loadRecent();
   $('#recentList').innerHTML = items.length ? items.map(item => {
@@ -427,6 +487,7 @@ function fillContext(result) {
 $('#saveCapture').addEventListener('click', async () => {
   const metadata = {
     kind: state.mode, category: $('#category').value, title: $('#title').value,
+    device_id: state.deviceId, device_name: state.deviceName,
     context: $('#context').value, tags: $('#tags').value.split(',').map(value => value.trim()).filter(Boolean),
     destination: $('#destination').value || inboxName, original_text: state.text,
     recognition_status: state.analysis?.source === 'gemini' || state.analysis?.source === 'openai' ? 'recognized' : 'not_run',
@@ -480,6 +541,17 @@ $('#scopeName').textContent = scope === 'work' ? 'WORK CAPTURE' : 'PERSONAL CAPT
 $('#scopeSwitch').textContent = scope === 'work' ? 'Switch to personal' : 'Switch to work';
 $('#scopeSwitch').href = `${scope === 'work' ? '/capture' : '/work'}${launchSearchForPath(launchParams)}`;
 $('#captureDestination').textContent = inboxName;
+$('#deviceName').textContent = state.deviceName;
+$('#deviceButton').title = `Capture device ID: ${state.deviceId}`;
+$('#deviceButton').addEventListener('click', () => {
+  const next = (prompt('Name this capture device:', state.deviceName) || '').trim();
+  if (!next || next.length > 60) return;
+  state.deviceName = next;
+  localStorage.setItem(deviceNameKey, next);
+  $('#deviceName').textContent = next;
+  $('#deviceButton').title = `Capture device ID: ${state.deviceId}`;
+});
+$('#refreshInbox').addEventListener('click', loadInbox);
 
 function renderLaunchContext() {
   const card = $('#launchContext');
@@ -582,7 +654,7 @@ $('#saveRecord').addEventListener('click', async () => {
   }
 });
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=7').then(registration => registration.update()).catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=8').then(registration => registration.update()).catch(() => {});
 renderRecent();
 renderLaunchContext();
 if (!recordId && launchParams.get('camera') === '1') {
@@ -591,5 +663,6 @@ if (!recordId && launchParams.get('camera') === '1') {
 loadRecordDetails();
 runQueue();
 refreshStatuses();
+if (state.accessKey && !recordId) loadInbox();
 setInterval(refreshStatuses, 15000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { runQueue(); refreshStatuses(); } });
