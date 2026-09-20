@@ -342,6 +342,27 @@ function cleanEditorPatch(value,current){
   return clean;
 }
 
+async function listCaptures(scope, limit = 50){
+  const safeLimit=Math.min(Math.max(Number(limit)||50,1),100);
+  const driveStore=driveStoreFor(scope);
+  if(driveStore.configured) return (await driveStore.listRecentCaptures(safeLimit)).slice(0,safeLimit);
+  if(storageBucket) throw new Error('Capture inbox listing is not configured for Cloud Storage.');
+  const dir=path.join(uploadDir,scope);
+  let names=[];
+  try { names=await fs.readdir(dir); } catch { return []; }
+  const records=[];
+  for(const name of names){
+    if(!validCaptureId(name)) continue;
+    try {
+      const record=JSON.parse(await fs.readFile(path.join(dir,name,'metadata.json'),'utf8'));
+      if(record && typeof record==='object') records.push(record);
+    } catch {}
+  }
+  return records
+    .sort((a,b)=>String(b.updated_at||b.created_at||'').localeCompare(String(a.updated_at||a.created_at||'')))
+    .slice(0,safeLimit);
+}
+
 async function readCapture(id,scope){
   const driveStore=driveStoreFor(scope);
   if(driveStore.configured) return (await driveStore.readCapture(id))?.record||null;
@@ -416,6 +437,12 @@ async function api(req,res,url){
 
   if(req.method==='POST' && url.pathname==='/api/save'){
     return json(res,200,await saveCapture(await bodyJson(req)));
+  }
+
+  if(req.method==='GET' && url.pathname==='/api/captures'){
+    const scope=captureScope(url.searchParams.get('scope'));
+    const limit=url.searchParams.get('limit') || '50';
+    return json(res,200,{ok:true,scope,records:await listCaptures(scope,limit)});
   }
 
   const processMatch=url.pathname.match(/^\/api\/captures\/([a-zA-Z0-9-]{10,120})\/process$/);
