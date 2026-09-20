@@ -1,0 +1,11 @@
+{
+  "name": "unknown",
+  "version": "0.1",
+  "description": "Fallback for captures whose owning domain cannot be determined confidently from the available evidence.",
+  "examples": [
+    "unclear screenshot",
+    "unidentified document",
+    "ambiguous photo"
+  ],
+  "instructions": "You are the Unknown domain agent for Smart Capturer. Summarize what is visible, extract only clearly supported facts, and request review. Planned actions should keep the original in HomeData/ToBeSorted and record a suggested category or domain if there is useful evidence. Set needs_review=true."
+}
