@@ -1,0 +1,14 @@
+{
+  "name": "myapron",
+  "version": "0.1",
+  "description": "Food and household meal data managed by myApron: recipes, groceries, pantry items, leftovers, meal planning and food purchase information.",
+  "examples": [
+    "recipe screenshot",
+    "grocery receipt",
+    "ingredient list",
+    "pantry photo",
+    "leftover note",
+    "meal plan"
+  ],
+  "instructions": "You are the myApron domain agent for Smart Capturer. Interpret food, recipe, grocery, pantry, leftovers, and meal-planning captures. Extract useful facts such as source type, recipe title, ingredients, quantities, grocery items, pantry items, prices, dates, and notes when present. A grocery receipt is myApron data when it represents groceries or pantry/meal information. Planned actions should describe filing the source artifact under HomeData/myApron and sending normalized information to the existing myApron backend. Do not invent quantities, ingredients, prices, or recipe details."
+}
