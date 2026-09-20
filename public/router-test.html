@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Smart Capturer Router Test</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    main{max-width:900px;margin:0 auto;padding:20px} label{display:block;margin:14px 0 6px;font-weight:600}
+    input,select,textarea,button{font:inherit} input,select,textarea{width:100%;box-sizing:border-box;padding:10px}
+    textarea{min-height:90px} button{margin-top:16px;padding:12px 18px} pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111;color:#eee;padding:14px;border-radius:8px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.muted{opacity:.75}.status{margin-top:14px;font-weight:600}
+    @media(max-width:650px){.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Router Test</h1>
+  <p class="muted">Dry run only. Nothing is moved or written to Fleet, myApron, Andrew's Homework, or Drive destinations.</p>
+  <form id="routerForm">
+    <label for="files">Images (up to 4)</label>
+    <input id="files" type="file" accept="image/*" multiple>
+    <label for="text">Text / captured data</label>
+    <textarea id="text" placeholder="Paste receipt text, notes, a link, or other captured data"></textarea>
+    <div class="row">
+      <div>
+        <label for="forceDomain">Force domain (optional)</label>
+        <select id="forceDomain"><option value="">AI chooses</option></select>
+      </div>
+      <div>
+        <label for="notes">Router notes / hint (optional)</label>
+        <input id="notes" placeholder="e.g. this came from the camper">
+      </div>
+    </div>
+    <label for="locked">Locked context JSON (optional)</label>
+    <textarea id="locked" placeholder='{"vehicle":"F350"}'></textarea>
+    <button type="submit">Run Router</button>
+  </form>
+  <div id="status" class="status"></div>
+  <h2>Result</h2>
+  <pre id="result">No test run yet.</pre>
+</main>
+<script type="module" src="/router-test.js"></script>
+</body>
+</html>

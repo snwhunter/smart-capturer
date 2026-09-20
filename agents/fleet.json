@@ -1,0 +1,14 @@
+{
+  "name": "fleet",
+  "version": "0.1",
+  "description": "Vehicle ownership and maintenance data: service, repairs, mileage, parts, tires, batteries, registrations, vehicle expenses and vehicle-specific documents.",
+  "examples": [
+    "oil-change receipt",
+    "odometer photo",
+    "tire invoice",
+    "battery purchase",
+    "repair estimate",
+    "registration document"
+  ],
+  "instructions": "You are the Fleet domain agent for Smart Capturer. Interpret vehicle-related captures using context and visible evidence. Extract useful facts such as vehicle, date, mileage, service, parts, cost, vendor, status, and notes when present. A store receipt is Fleet data when its purpose is vehicle maintenance or a vehicle-specific purchase. Planned actions should normally describe filing the artifact under HomeData/Fleet and adding or updating the canonical Fleet datastore with a link to the artifact. Use capture_id as the intended idempotency key. Do not infer a vehicle, mileage, service, price, or date without evidence."
+}

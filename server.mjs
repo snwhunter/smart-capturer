@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAnalyzer } from './ai.mjs';
+import { createRouter } from './router.mjs';
 import { createDriveStore } from './drive.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,6 +14,7 @@ const port = Number(process.env.PORT || 8080);
 const storageBucket = process.env.STORAGE_BUCKET || '';
 const accessKey = process.env.CAPTURE_ACCESS_KEY || '';
 const analyzer = createAnalyzer();
+const router = await createRouter();
 const personalDriveStore = createDriveStore();
 const workDriveStore = createDriveStore({
   env: { ...process.env, DRIVE_FOLDER_ID: process.env.WORK_DRIVE_FOLDER_ID || '' }
@@ -483,7 +485,8 @@ async function api(req,res,url){
 
 async function serve(req,res,url){
   let rel=decodeURIComponent(url.pathname);
-  if(rel==='/' || rel==='/capture' || rel==='/work' || /^\/record\/[a-zA-Z0-9-]{10,120}$/.test(rel)) rel='/index.html';
+  if(rel==='/router-test') rel='/router-test.html';
+  else if(rel==='/' || rel==='/capture' || rel==='/work' || /^\/record\/[a-zA-Z0-9-]{10,120}$/.test(rel)) rel='/index.html';
   const target=path.normalize(path.join(publicDir,rel));
   if(!target.startsWith(publicDir)){
     res.writeHead(403);
