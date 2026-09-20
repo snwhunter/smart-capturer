@@ -111,6 +111,23 @@ export function createDriveStore({ env = process.env, fetchImpl = globalThis.fet
     return (await findFiles(captureId, 'metadata', 2))[0] || null;
   }
 
+  async function listMetadataFiles(pageSize = 50) {
+    if (!folderId || !credentials) throw new DriveStoreError('not-configured');
+    const token = await accessToken();
+    const q = `trashed = false and '${folderId.replace(/'/g, "\\'")}' in parents and appProperties has { key='smartCapturerRole' and value='metadata' }`;
+    const url = new URL('https://www.googleapis.com/drive/v3/files');
+    url.searchParams.set('q', q);
+    url.searchParams.set('fields', 'files(id,name,size,mimeType,modifiedTime)');
+    url.searchParams.set('orderBy', 'modifiedTime desc');
+    url.searchParams.set('pageSize', String(Math.min(Math.max(Number(pageSize) || 50, 1), 100)));
+    url.searchParams.set('supportsAllDrives', 'true');
+    url.searchParams.set('includeItemsFromAllDrives', 'true');
+    const result = await checkedJson(fetchImpl, url, {
+      headers: { authorization: `Bearer ${token}` }
+    }, 'list-metadata');
+    return result.files || [];
+  }
+
   async function readMetadata(captureId) {
     const file = await findMetadata(captureId);
     if (!file) return null;
@@ -161,6 +178,28 @@ export function createDriveStore({ env = process.env, fetchImpl = globalThis.fet
       } catch (error) {
         logger.error(`Drive capture listing failed: code=${error instanceof DriveStoreError ? error.code : 'unknown'}`);
         throw new Error('Existing capture files could not be checked in Google Drive.');
+      }
+    },
+    async listRecentCaptures(limit = 50) {
+      try {
+        const files = await listMetadataFiles(limit);
+        const token = await accessToken();
+        const records = [];
+        for (const file of files) {
+          const response = await checkedResponse(fetchImpl,
+            `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?alt=media&supportsAllDrives=true`,
+            { headers: { authorization: `Bearer ${token}` } }, 'read-metadata');
+          try {
+            const record = JSON.parse(await response.text());
+            if (record && typeof record === 'object') records.push(record);
+          } catch {
+            logger.error('Drive metadata list skipped one invalid metadata file');
+          }
+        }
+        return records;
+      } catch (error) {
+        logger.error(`Drive inbox listing failed: code=${error instanceof DriveStoreError ? error.code : 'unknown'}`);
+        throw new Error('The ToBeSorted inbox could not be read from Google Drive.');
       }
     },
     async updateCapture(captureId, patch) {
