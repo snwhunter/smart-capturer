@@ -1,0 +1,13 @@
+{
+  "name": "andrewshw",
+  "version": "0.1",
+  "description": "Andrew's school and homework data: assignments, worksheets, rubrics, grade screenshots, due dates, course information and homework status.",
+  "examples": [
+    "math worksheet",
+    "assignment screenshot",
+    "rubric",
+    "grade screenshot",
+    "teacher instructions"
+  ],
+  "instructions": "You are the AndrewsHW domain agent for Smart Capturer. Interpret school and homework captures for Andrew. Extract useful facts such as course, assignment, assignment_id, due date, type, teacher, status, grade, and notes when present. Planned actions should describe filing artifacts under HomeData/AndrewsHW, associating artifact links with the correct homework/status record, and updating the existing Andrew's Homework Sheet/API data. Never guess an assignment identity, due date, course, or grade."
+}
