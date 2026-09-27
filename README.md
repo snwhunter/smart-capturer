@@ -1,6 +1,11 @@
-# Smart Capturer — Revision 5
+# Smart Capturer — Revision 7
 
 iPhone-first PWA for rapidly capturing **images, links, and data** into personal and work inboxes. Photo capture immediately returns control to the camera while upload and optional recognition continue in a resumable queue.
+
+## Rev 7
+- Domain selector in the main capture UI: Auto, eBay, Fleet, myApron, Andrew’s HW, or Other
+- `?domain=ebay` deep link preselects the eBay domain while still allowing the user to change it
+- Selected domain is saved into capture metadata and shown in the capture log/inbox
 
 ## Rev 5
 - Rapid `capture -> use -> capture` photo loop; upload and AI never block the next capture

@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="Smart Capturer" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest?v=5" />
-  <link rel="stylesheet" href="/styles.css?v=7" />
+  <link rel="stylesheet" href="/styles.css?v=8" />
   <title>Smart Capturer</title>
 </head>
 <body>
@@ -63,6 +63,20 @@
         <button class="mode" data-mode="data">✍️<span>Data</span></button>
       </div>
 
+      <div class="domain-picker">
+        <label for="domainSelect">Domain
+          <select id="domainSelect">
+            <option value="">Auto — let AI decide</option>
+            <option value="ebay">eBay listing</option>
+            <option value="fleet">Fleet</option>
+            <option value="myapron">myApron</option>
+            <option value="andrewshw">Andrew’s HW</option>
+            <option value="unknown">Other / general</option>
+          </select>
+        </label>
+        <span id="domainHint" class="domain-hint">AI will choose the destination domain.</span>
+      </div>
+
       <div id="imagePane" class="pane active">
         <div id="liveCamera" class="hidden">
           <video id="cameraVideo" autoplay muted playsinline aria-label="Live camera preview"></video>
@@ -96,6 +110,6 @@
 
     <section class="card recent-card"><div class="section-title"><div><span class="eyebrow">TO BE SORTED</span><h2>Inbox from Drive</h2></div><button id="refreshInbox" class="secondary-button compact-button" type="button">Refresh</button></div><div id="inboxList" class="recent-list"><p class="muted">Tap Refresh to read ToBeSorted.</p></div></section>
   </main>
-  <script src="/app.js?v=7" type="module"></script>
+  <script src="/app.js?v=8" type="module"></script>
 </body>
 </html>

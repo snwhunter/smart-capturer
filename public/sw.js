@@ -1,5 +1,5 @@
-const CACHE = 'smart-capturer-v8';
-const ASSETS = ['/', '/capture', '/work', '/styles.css?v=7', '/app.js?v=7', '/direct-camera.js?v=6', '/launch-context.js?v=5', '/manifest.webmanifest?v=5'];
+const CACHE = 'smart-capturer-v9';
+const ASSETS = ['/', '/capture', '/work', '/styles.css?v=8', '/app.js?v=8', '/direct-camera.js?v=6', '/launch-context.js?v=5', '/manifest.webmanifest?v=5'];
 
 self.addEventListener('install', e => {
   self.skipWaiting();

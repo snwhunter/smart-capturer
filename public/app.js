@@ -11,6 +11,13 @@ const inboxName = scope === 'work' ? 'Work / ToBeSorted' : 'Personal / ToBeSorte
 const recentKey = `smartCapturerRecent:${scope}`;
 const deviceIdKey = 'smartCapturerDeviceId';
 const deviceNameKey = 'smartCapturerDeviceName';
+const supportedDomains = new Set(['ebay', 'fleet', 'myapron', 'andrewshw', 'unknown']);
+const requestedDomain = (launchParams.get('domain') || '').trim().toLowerCase();
+const initialDomain = supportedDomains.has(requestedDomain) ? requestedDomain : '';
+
+function domainLabel(value) {
+  return ({ ebay:'eBay listing', fleet:'Fleet', myapron:'myApron', andrewshw:'Andrew’s HW', unknown:'Other / general' })[value] || 'Auto';
+}
 
 function defaultDeviceName() {
   const ua = navigator.userAgent || '';
@@ -43,6 +50,7 @@ const state = {
   accessKey: localStorage.getItem('smartCapturerAccessKey') || '',
   deviceId: initialDevice.id,
   deviceName: initialDevice.name,
+  domain: initialDomain,
   processing: new Set()
 };
 
@@ -165,13 +173,15 @@ async function enqueueImages(files) {
   $('#cameraInput').value = '';
   $('#fileInput').value = '';
   const contextName = state.launchContext?.assignment_name || state.launchContext?.context;
-  setStatus(`${images.length} capture${images.length === 1 ? '' : 's'} queued${contextName ? ` for ${contextName}` : ''}. Ready for the next photo.`);
+  const domainName = state.domain ? domainLabel(state.domain) : '';
+  setStatus(`${images.length} capture${images.length === 1 ? '' : 's'} queued${contextName ? ` for ${contextName}` : domainName ? ` for ${domainName}` : ''}. Ready for the next photo.`);
 
   for (const file of images) {
     const id = makeCaptureId();
     const entry = {
       id, scope, created_at: new Date().toISOString(), thumbnail: '',
       device_id: state.deviceId, device_name: state.deviceName,
+      domain: state.domain, domain_locked: Boolean(state.domain),
       title: state.launchContext?.title || file.name || 'Photo',
       context: state.launchContext?.context || '',
       external_ref: state.launchContext?.external_ref || '',
@@ -186,6 +196,7 @@ async function enqueueImages(files) {
         id, scope, file, name: file.name || 'capture.jpg', type: file.type || 'image/jpeg',
         created_at: entry.created_at,
         device_id: state.deviceId, device_name: state.deviceName,
+        domain: state.domain,
         launch_context: state.launchContext ? { ...state.launchContext, tags: [...state.launchContext.tags] } : null
       });
     } catch {
@@ -200,10 +211,12 @@ async function enqueueText(kind, text) {
   if (text.length > 200000) return setStatus('This item is too large. Keep link or data captures under 200,000 characters.');
   const id = makeCaptureId();
   const contextName = state.launchContext?.assignment_name || state.launchContext?.context || '';
+  const domainName = state.domain ? domainLabel(state.domain) : '';
   const title = state.launchContext?.title || (kind === 'link' ? text.slice(0, 300) : text.replace(/\s+/g, ' ').slice(0, 80)) || `New ${kind}`;
   const entry = {
     id, scope, kind, created_at: new Date().toISOString(), thumbnail: '', title,
     device_id: state.deviceId, device_name: state.deviceName,
+    domain: state.domain, domain_locked: Boolean(state.domain),
     context: state.launchContext?.context || '', external_ref: state.launchContext?.external_ref || '',
     category: state.launchContext?.category || 'Unsorted', destination: inboxName,
     upload_status: 'queued', recognition_status: 'pending', processing_status: 'queued', workflow_status: 'to_be_sorted',
@@ -212,11 +225,12 @@ async function enqueueText(kind, text) {
   upsertRecent(entry);
   if (kind === 'link') $('#linkInput').value = '';
   else $('#dataInput').value = '';
-  setStatus(`${kind === 'link' ? 'Link' : 'Data'} queued${contextName ? ` for ${contextName}` : ''}. Ready for the next item.`);
+  setStatus(`${kind === 'link' ? 'Link' : 'Data'} queued${contextName ? ` for ${contextName}` : domainName ? ` for ${domainName}` : ''}. Ready for the next item.`);
   try {
     await queuePut({
       id, scope, kind, text, created_at: entry.created_at,
       device_id: state.deviceId, device_name: state.deviceName,
+      domain: state.domain,
       launch_context: state.launchContext ? { ...state.launchContext, tags: [...state.launchContext.tags] } : null
     });
     runQueue();
@@ -268,6 +282,7 @@ async function processJob(job) {
         metadata: {
           kind, capture_status: 'saved', workflow_status: 'to_be_sorted',
           device_id: job.device_id || state.deviceId, device_name: job.device_name || state.deviceName,
+          domain: job.domain || '', domain_locked: Boolean(job.domain),
           recognition_status: 'pending', processing_status: kind === 'image' ? undefined : 'queued', destination: inboxName,
           original_filename: kind === 'image' ? job.name : undefined,
           original_text: kind === 'image' ? undefined : job.text,
@@ -354,6 +369,7 @@ async function refreshStatuses() {
       upsertRecent({
         id: item.id,
         title: record.title || item.title,
+        domain: record.domain || item.domain,
         category: record.category || item.category,
         destination: record.destination || item.destination,
         recognition_status: record.recognition_status || item.recognition_status,
@@ -380,7 +396,7 @@ async function loadInbox() {
       return `<a class="recent-item saved" href="${esc(recordHref(record.id))}">
         <div class="recent-thumb"><span>${icon}</span></div>
         <div class="recent-body"><strong>${esc(record.title || record.context || 'Capture')}</strong>
-          <span class="recent-meta">${esc(workflowLabel(record))} · ${esc(device)}</span>
+          <span class="recent-meta">${esc(workflowLabel(record))} · ${esc(device)}${record.domain ? ` · ${esc(domainLabel(record.domain))}` : ""}</span>
           ${record.context ? `<span class="recent-context">${esc(record.context)}</span>` : ''}
           <span class="recent-destination">${esc(record.destination || inboxName)}</span>
         </div>
@@ -408,7 +424,7 @@ function renderRecent() {
     return `<${tag} class="recent-item ${esc(item.upload_status || 'queued')}"${href}>
       <div class="recent-thumb">${item.thumbnail?.startsWith('data:image/') ? `<img src="${esc(item.thumbnail)}" alt="Capture thumbnail">` : `<span>${icon}</span>`}</div>
       <div class="recent-body"><strong>${esc(item.title || 'Photo')}</strong>
-        <span class="recent-meta">${esc(upload)} · ${esc(recognition)} · ${esc(workflowLabel(item))}</span>
+        <span class="recent-meta">${esc(upload)} · ${esc(recognition)} · ${esc(workflowLabel(item))}${item.domain ? ` · ${esc(domainLabel(item.domain))}` : ""}</span>
         ${item.context ? `<span class="recent-context">${esc(item.context)}</span>` : ''}
         <span class="recent-destination">${esc(item.destination || inboxName)}</span>
         ${item.message ? `<span class="recent-message">${esc(item.message)}</span>` : ''}
@@ -537,10 +553,33 @@ function esc(value = '') {
   return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
 }
 
+function renderDomainSelection() {
+  $('#domainSelect').value = state.domain;
+  $('#domainHint').textContent = state.domain
+    ? `${domainLabel(state.domain)} is locked for new captures in this session.`
+    : 'AI will choose the destination domain.';
+  if (!state.launchContext) {
+    $('#cameraButtonLabel').textContent = state.domain === 'ebay' ? 'Take eBay item photo' : 'Take photo';
+    document.title = state.domain ? `${domainLabel(state.domain)} Capture · Smart Capturer` : 'Smart Capturer';
+  }
+}
+
+function selectDomain(value) {
+  state.domain = supportedDomains.has(value) ? value : '';
+  if (state.domain) launchParams.set('domain', state.domain);
+  else launchParams.delete('domain');
+  const query = launchParams.toString();
+  history.replaceState(null, '', `${location.pathname}${query ? `?${query}` : ''}`);
+  $('#scopeSwitch').href = `${scope === 'work' ? '/capture' : '/work'}${launchSearchForPath(launchParams)}`;
+  renderDomainSelection();
+  setStatus(state.domain ? `${domainLabel(state.domain)} selected. New captures will stay in this domain.` : 'Automatic domain selection enabled.');
+}
+
 $('#scopeName').textContent = scope === 'work' ? 'WORK CAPTURE' : 'PERSONAL CAPTURE';
 $('#scopeSwitch').textContent = scope === 'work' ? 'Switch to personal' : 'Switch to work';
 $('#scopeSwitch').href = `${scope === 'work' ? '/capture' : '/work'}${launchSearchForPath(launchParams)}`;
 $('#captureDestination').textContent = inboxName;
+$('#domainSelect').addEventListener('change', event => selectDomain(event.target.value));
 $('#deviceName').textContent = state.deviceName;
 $('#deviceButton').title = `Capture device ID: ${state.deviceId}`;
 $('#deviceButton').addEventListener('click', () => {
@@ -559,8 +598,8 @@ function renderLaunchContext() {
   if (!state.launchContext) {
     card.classList.add('hidden');
     captureCard.classList.remove('context-active');
-    $('#cameraButtonLabel').textContent = 'Take photo';
-    document.title = 'Smart Capturer';
+    $('#cameraButtonLabel').textContent = state.domain === 'ebay' ? 'Take eBay item photo' : 'Take photo';
+    document.title = state.domain ? `${domainLabel(state.domain)} Capture · Smart Capturer` : 'Smart Capturer';
     return;
   }
   $('#launchContextType').textContent = state.launchContext.assignment_name ? 'YOU ARE SCANNING FOR THIS ASSIGNMENT' : 'YOU ARE CAPTURING FOR THIS CONTEXT';
@@ -616,7 +655,7 @@ function showRecord(record) {
   $('#recordTags').value = Array.isArray(record.tags) ? record.tags.join(', ') : '';
   $('#recordDestination').value = record.destination || inboxName;
   $('#recordStatusBadge').textContent = workflowLabel(record);
-  const identity = [record.source, record.assignment_name, record.external_ref].filter(Boolean).join(' · ');
+  const identity = [record.domain ? `Domain: ${domainLabel(record.domain)}` : '', record.source, record.assignment_name, record.external_ref].filter(Boolean).join(' · ');
   $('#recordIdentity').textContent = identity;
   $('#recordIdentity').classList.toggle('hidden', !identity);
   document.title = `${record.title || record.context || 'Capture record'} · Smart Capturer`;
@@ -656,9 +695,10 @@ $('#saveRecord').addEventListener('click', async () => {
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=8').then(registration => registration.update()).catch(() => {});
 renderRecent();
+renderDomainSelection();
 renderLaunchContext();
 if (!recordId && launchParams.get('camera') === '1') {
-  startDirectCamera({ enqueueImages, contextName: () => state.launchContext?.assignment_name || state.launchContext?.context || '' });
+  startDirectCamera({ enqueueImages, contextName: () => state.launchContext?.assignment_name || state.launchContext?.context || (state.domain ? domainLabel(state.domain) : '') });
 }
 loadRecordDetails();
 runQueue();

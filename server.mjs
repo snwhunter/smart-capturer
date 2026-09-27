@@ -420,7 +420,7 @@ async function api(req,res,url){
     return json(res,200,{
       ok:true,
       app:'Smart Capturer',
-      revision:6,
+      revision:7,
       auth_required:Boolean(accessKey),
       storage:personalDriveStore.configured?'google-drive':storageBucket?'gcs':'local-development',
       scopes:{personal:true,work:workDriveStore.configured||Boolean(storageBucket)||!personalDriveStore.configured},
